@@ -33,17 +33,25 @@ AIS-catcher Installation Script
 Usage: sudo $0 [OPTIONS]
 
 Options:
-  -p, --package    Install from pre-built package (faster, recommended)
-  -b, --branch     Specify git branch to clone (default: main)
-  --no-systemd     Skip systemd service installation (useful for containers)
-  --no-user        Skip user creation and run as root (useful for containers)
-  -h, --help       Display this help message
+  -p, --package              Install from pre-built package (faster, recommended)
+  -b, --branch               Specify git branch to clone (default: main)
+  --no-systemd               Skip systemd service installation (useful for containers)
+  --no-user                  Skip user creation and run as root (useful for containers)
+  --set-reboot-on-failure [BURST [SEC]]  Enable reboot watchdog (default: 3 restarts in 1800s)
+  --unset-reboot-on-failure              Disable automatic reboot on repeated failures
+  --set-auto-restart                     Enable automatic service restart on crash (Restart=always)
+  --unset-auto-restart                   Disable automatic service restart on crash (Restart=no)
+  -h, --help                 Display this help message
 
 Examples:
   sudo $0 --package                    # Install from pre-built package
   sudo $0                              # Build and install from source (main branch)
   sudo $0 -b develop                   # Build from develop branch
   sudo $0 --no-systemd --no-user       # Docker/container installation
+  sudo $SCRIPT_NAME --set-reboot-on-failure      # Enable reboot watchdog (no reinstall needed)
+  sudo $SCRIPT_NAME --unset-reboot-on-failure    # Disable reboot watchdog (no reinstall needed)
+  sudo $SCRIPT_NAME --set-auto-restart           # Enable auto-restart on crash (no reinstall needed)
+  sudo $SCRIPT_NAME --unset-auto-restart         # Disable auto-restart on crash (no reinstall needed)
 
 For more information, visit: https://docs.aiscatcher.org/
 EOF
@@ -52,20 +60,24 @@ EOF
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
+    _hint_args=$(printf '%q ' "$@")
     if [[ -t 1 ]]; then
         echo -e "\033[1;31mError: This script must be run as root\033[0m" >&2
-        echo -e "\033[1;33mPlease run: sudo $0 $*\033[0m" >&2
+        echo -e "\033[1;33mPlease run: sudo $0 ${_hint_args% }\033[0m" >&2
     else
         echo "Error: This script must be run as root" >&2
-        echo "Please run: sudo $0 $*" >&2
+        echo "Please run: sudo $0 ${_hint_args% }" >&2
     fi
     exit 1
 fi
 
 # Constants
-readonly SCRIPT_NAME=$(basename "$0")
-readonly LOG_FILE="/var/log/${SCRIPT_NAME%.*}.log"
-readonly TMP_DIR=$(mktemp -d -t AIS-catcher-XXXXXX)
+SCRIPT_NAME=$(basename "$0")
+readonly SCRIPT_NAME
+LOG_FILE="/var/log/${SCRIPT_NAME%.*}.log"
+readonly LOG_FILE
+TMP_DIR=$(mktemp -d -t AIS-catcher-XXXXXX)
+readonly TMP_DIR
 readonly CONFIG_DIR="/etc/AIS-catcher"
 readonly PLUGIN_DIR="${CONFIG_DIR}/plugins"
 readonly DBMS_DIR="${CONFIG_DIR}/DBMS"
@@ -75,6 +87,10 @@ readonly CONFIG_FILE="${CONFIG_DIR}/config.json"
 readonly CMD_FILE="${CONFIG_DIR}/config.cmd"
 readonly SERVICE_NAME="ais-catcher.service"
 readonly SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
+readonly REBOOT_SERVICE_NAME="ais-catcher-reboot.service"
+readonly REBOOT_SERVICE_FILE="/etc/systemd/system/${REBOOT_SERVICE_NAME}"
+readonly REBOOT_BURST_DEFAULT=3
+readonly REBOOT_INTERVAL_DEFAULT=1800
 
 # Global variables
 INSTALL_PACKAGE=false
@@ -82,6 +98,11 @@ SKIP_SYSTEMD=false
 SKIP_USER=false
 BRANCH="main"
 SERVICE_STATE=""
+SET_REBOOT=""
+REBOOT_BURST="${REBOOT_BURST_DEFAULT}"
+REBOOT_INTERVAL="${REBOOT_INTERVAL_DEFAULT}"
+SET_AUTO_RESTART=""
+INSTALL_REQUESTED=false
 
 # Color constants (using ANSI escape codes)
 if [[ -t 1 ]]; then
@@ -132,10 +153,10 @@ log() {
             ;;
     esac
     
-    # Print to terminal with color
-    echo -e "${COLOR_CYAN}[${timestamp}]${COLOR_RESET} ${color}[${level}]${COLOR_RESET} $*"
+    # Print to terminal with color; %s ensures backslashes in message text are not interpreted
+    printf "${COLOR_CYAN}[${timestamp}]${COLOR_RESET} ${color}[${level}]${COLOR_RESET} %s\n" "$*"
     # Log to file without color codes
-    echo "[${timestamp}] [${level}] $*" >> "$LOG_FILE"
+    printf '[%s] [%s] %s\n' "${timestamp}" "${level}" "$*" >> "$LOG_FILE"
 }
 
 # Error handler
@@ -155,6 +176,100 @@ cleanup() {
     rm -rf "$TMP_DIR"
 }
 
+# Cancel any pending reboot and stop the watchdog service.
+# Safe to call unconditionally — harmless if nothing is pending or running.
+cancel_reboot_watchdog() {
+    shutdown -c 2>/dev/null || true
+    systemctl stop "$REBOOT_SERVICE_NAME" 2>/dev/null || true
+    log "INFO" "Reboot watchdog cancelled (pending shutdown cleared, service stopped)"
+}
+
+# Replace a directive if present in FILE, otherwise insert it under its section header.
+sed_replace_or_insert() {
+    local key="$1" val="$2" section="$3" file="$4"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s/^${key}=.*/${key}=${val}/" "$file"
+    else
+        sed -i "/^\[${section}\]/a ${key}=${val}" "$file"
+    fi
+}
+
+# Reload systemd and reset the service failure counter.
+reload_and_reset_service() {
+    systemctl daemon-reload || error_exit "Failed to reload systemd"
+    log "INFO" "Resetting failure counter for ${SERVICE_NAME}"
+    systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || log "WARN" "Failed to reset failure counter"
+}
+
+# Log whether new policy settings will take effect now or at next restart.
+# Neither toggle handler restarts the service, so we just check current state for messaging.
+log_service_policy_notice() {
+    local policy_desc="$1"
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        log "INFO" "${SERVICE_NAME} is running — ${policy_desc} will apply from the next restart"
+    else
+        log "INFO" "${SERVICE_NAME} was not running — configuration updated"
+    fi
+}
+
+################################################################################
+# REBOOT-ON-FAILURE TOGGLE (standalone, no reinstall needed)
+################################################################################
+
+# Enable or disable the reboot watchdog by updating StartLimitBurst/Interval in the service file
+handle_reboot_setting() {
+    if [[ ! -f "$SERVICE_FILE" ]]; then
+        error_exit "Service file not found at ${SERVICE_FILE} — is AIS-catcher installed?"
+    fi
+
+    if [[ "$SET_REBOOT" == "true" ]]; then
+        sed_replace_or_insert StartLimitBurst    "${REBOOT_BURST}"    Unit "$SERVICE_FILE"
+        sed_replace_or_insert StartLimitIntervalSec "${REBOOT_INTERVAL}" Unit "$SERVICE_FILE"
+        # Add OnFailure= if not already present
+        if ! grep -q "^OnFailure=" "$SERVICE_FILE"; then
+            sed -i "/^After=network.target/a OnFailure=${REBOOT_SERVICE_NAME}" "$SERVICE_FILE"
+        fi
+        log "INFO" "Reboot on failure enabled (burst: ${REBOOT_BURST}, interval: ${REBOOT_INTERVAL}s)"
+    else
+        sed_replace_or_insert StartLimitBurst    0 Unit "$SERVICE_FILE"
+        sed_replace_or_insert StartLimitIntervalSec 0 Unit "$SERVICE_FILE"
+        # Remove OnFailure= line — with burst=0 it fires on every crash, not just limit-hit
+        sed -i "/^OnFailure=/d" "$SERVICE_FILE"
+        log "INFO" "Reboot on failure disabled"
+    fi
+
+    reload_and_reset_service
+
+    # No restart needed: Restart=, StartLimitBurst=, OnFailure= are systemd policy directives
+    # that take effect on the next crash/start — daemon-reload is sufficient.
+    log_service_policy_notice "new watchdog settings"
+}
+
+################################################################################
+# AUTO-RESTART TOGGLE (standalone, no reinstall needed)
+################################################################################
+
+# Enable or disable automatic service restart by updating Restart= in the service file
+handle_auto_restart_setting() {
+    if [[ ! -f "$SERVICE_FILE" ]]; then
+        error_exit "Service file not found at ${SERVICE_FILE} — is AIS-catcher installed?"
+    fi
+
+    if [[ "$SET_AUTO_RESTART" == "true" ]]; then
+        sed_replace_or_insert Restart always Service "$SERVICE_FILE"
+        log "INFO" "Auto-restart enabled (Restart=always)"
+    else
+        sed_replace_or_insert Restart no Service "$SERVICE_FILE"
+        log "INFO" "Auto-restart disabled (Restart=no)"
+    fi
+
+    reload_and_reset_service
+
+    # No restart needed: Restart= is a systemd policy directive that takes effect on the
+    # next crash/start — daemon-reload is sufficient and avoids unnecessary interruption.
+    log_service_policy_notice "new restart policy"
+}
+
 ################################################################################
 # UTILITY FUNCTIONS (Used by both package and source installations)
 ################################################################################
@@ -171,44 +286,24 @@ check_existing_service() {
 
 # Detect system information (OS, version, architecture)
 get_system_info() {
+    local os version arch
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        if [ "$ID" = "raspbian" ]; then
-            OS="debian"
+        if [ "${ID:-}" = "raspbian" ]; then
+            os="debian"
         else
-            OS="$ID"
+            os="${ID:-}"
         fi
-        VERSION="$VERSION_CODENAME"
+        version="${VERSION_CODENAME:-}"
+        [[ -z "$os" ]]      && error_exit "Could not determine OS ID from /etc/os-release"
+        [[ -z "$version" ]] && error_exit "Could not determine VERSION_CODENAME from /etc/os-release"
     else
-        OS=$(uname -s)
-        VERSION=$(uname -r)
+        os=$(uname -s)  || error_exit "Failed to determine OS name (uname -s)"
+        version=$(uname -r) || error_exit "Failed to determine OS version (uname -r)"
     fi
-    ARCH=$(dpkg --print-architecture)
-    
-    echo "${OS}_${VERSION}_${ARCH}"
-}
+    arch=$(dpkg --print-architecture) || error_exit "Failed to determine system architecture (dpkg --print-architecture)"
 
-download_webassets_common() {
-    local webassets_url="https://github.com/jvde-github/webassets/archive/refs/heads/main.zip"
-    local temp_zip="/tmp/webassets.zip"
-    
-    log "INFO" "Downloading webassets"
-    if curl -sL "$webassets_url" -o "$temp_zip"; then
-        if [[ -d "$CONFIG_DIR/webassets" ]]; then
-            log "INFO" "Removing old webassets"
-            rm -rf "$CONFIG_DIR/webassets"
-        fi
-        
-        log "INFO" "Extracting webassets"
-        unzip -q "$temp_zip" -d "$CONFIG_DIR"
-        mv "$CONFIG_DIR/webassets-main" "$CONFIG_DIR/webassets"
-        rm "$temp_zip"
-        
-        log "INFO" "Webassets updated successfully"
-    else
-        log "ERROR" "Failed to download webassets"
-        return 1
-    fi
+    echo "${os}_${version}_${arch}"
 }
 
 ################################################################################
@@ -217,7 +312,7 @@ download_webassets_common() {
 
 # Install build dependencies for source compilation
 install_source_build_dependencies() {
-    local required_deps="git cmake build-essential pkg-config libssl-dev zlib1g-dev libusb-1.0-0-dev curl unzip"
+    local required_deps="git cmake build-essential pkg-config libssl-dev zlib1g-dev libusb-1.0-0-dev curl"
     local optional_deps="libzmq3-dev libpq-dev libsqlite3-dev libairspy-dev libairspyhf-dev libhackrf-dev"
     
     log "INFO" "Installing required build dependencies: $required_deps"
@@ -242,7 +337,8 @@ install_librtlsdr_from_source() {
     cmake ../ -DCMAKE_INSTALL_PREFIX="${LIB_DIR}" -DDETACH_KERNEL_DRIVER=ON -DINSTALL_UDEV_RULES=ON || error_exit "Failed to run cmake"
     make || error_exit "Failed to build rtl-sdr"
     make install || error_exit "Failed to install rtl-sdr"
-    ldconfig || error_exit "Failed to run ldconfig"
+    # ldconfig not needed: libraries are in a custom prefix and the RPATH in the AIS-catcher
+    # binary points directly to ${LIB_DIR}/lib, so the dynamic linker finds them without it.
     cd ../.. || error_exit "Failed to return to parent directory"
 }
 
@@ -255,7 +351,6 @@ install_libhydrasdr_from_source() {
     cmake .. -DCMAKE_INSTALL_PREFIX="${LIB_DIR}" -DINSTALL_UDEV_RULES=ON || error_exit "Failed to run cmake"
     make || error_exit "Failed to build libhydrasdr"
     make install || error_exit "Failed to install libhydrasdr"
-    ldconfig || error_exit "Failed to run ldconfig"
     cd ../../.. || error_exit "Failed to return to parent directory"
 }
 
@@ -307,25 +402,29 @@ build_ais_catcher_from_source() {
     make || error_exit "Failed to build AIS-catcher"
     
     cd ../..
-    cp AIS-catcher/build/AIS-catcher /usr/bin || error_exit "Failed to copy AIS-catcher executable"
+    install -m 755 AIS-catcher/build/AIS-catcher /usr/bin/AIS-catcher || error_exit "Failed to install AIS-catcher executable"
 }
 
 # Install additional files (plugins, DBMS, README, LICENSE) from source
 install_source_additional_files() {
+    # Ensure the config directory exists before copying files into it.
+    # Do not rely on mkdir -p "$PLUGIN_DIR" creating the parent as a side-effect.
+    mkdir -p "$CONFIG_DIR" || error_exit "Failed to create config directory"
+
     log "INFO" "Installing plugins"
     mkdir -p "$PLUGIN_DIR" || error_exit "Failed to create plugin directory"
-    cp AIS-catcher/plugins/* "$PLUGIN_DIR" || error_exit "Failed to copy plugins"
+    cp "${TMP_DIR}/AIS-catcher/plugins/"* "$PLUGIN_DIR" || error_exit "Failed to copy plugins"
 
     log "INFO" "Installing DBMS"
     mkdir -p "$DBMS_DIR" || error_exit "Failed to create DBMS directory"
-    cp AIS-catcher/Source/DBMS/create.sql "$DBMS_DIR" || error_exit "Failed to copy DBMS"
+    cp "${TMP_DIR}/AIS-catcher/Source/DBMS/create.sql" "$DBMS_DIR" || error_exit "Failed to copy DBMS"
 
     log "INFO" "Installing README"
     mkdir -p "$README_DIR" || error_exit "Failed to create README directory"
-    cp AIS-catcher/README.md "$README_DIR" || error_exit "Failed to copy README"
+    cp "${TMP_DIR}/AIS-catcher/README.md" "$README_DIR" || error_exit "Failed to copy README"
 
     log "INFO" "Copying LICENSE"
-    cp AIS-catcher/LICENSE /etc/AIS-catcher/LICENSE || error_exit "Failed to copy LICENSE"
+    cp "${TMP_DIR}/AIS-catcher/LICENSE" /etc/AIS-catcher/LICENSE || error_exit "Failed to copy LICENSE"
 }
 
 ################################################################################
@@ -378,8 +477,10 @@ check_package_availability() {
     return 1
 }
 
-# Install AIS-catcher from pre-built Debian package
-install_from_package() {
+# Download and install a pre-built Debian package by filename.
+# Separated from install_package_method so the download/install logic can be
+# tested or reused independently of the method-selection layer.
+download_and_install_deb() {
     local package=$1
     local download_url="https://github.com/jvde-github/AIS-catcher/releases/download/Edge/$package"
    
@@ -391,24 +492,19 @@ install_from_package() {
 
     # Download the package
     log "INFO" "Downloading package..."
-    if ! curl -sL -o "$temp_dir/$(basename "$download_url")" "$download_url"; then
+    if ! curl -fsL -o "$temp_dir/$(basename "$download_url")" "$download_url"; then
         rm -rf "$temp_dir"
-        error_exit "Failed to download package"
+        log "WARN" "Failed to download package"
+        return 1
     fi
 
     # Ensure the downloaded file has correct permissions
     chmod 644 "$temp_dir/$package"
 
-    # Install the package and dependencies using apt with proper flags
-    log "INFO" "Installing package and dependencies..."
-    if ! apt-get update; then
-        rm -rf "$temp_dir"
-        error_exit "Failed to update package lists"
-    fi
-
     # Use --allow-downgrades to handle version conflicts and better error handling
+    log "INFO" "Installing package and dependencies..."
     local install_success=false
-    if apt-get install -y --allow-downgrades "$temp_dir/$package" 2>/dev/null; then
+    if apt-get install -y --allow-downgrades "$temp_dir/$package"; then
         install_success=true
         log "INFO" "Package installed successfully"
     else
@@ -423,10 +519,36 @@ install_from_package() {
     rm -rf "$temp_dir" || log "WARN" "Failed to remove temporary directory: $temp_dir"
 
     if [[ "$install_success" != true ]]; then
-        error_exit "Failed to install package after all attempts"
+        log "WARN" "Failed to install package after all attempts"
+        return 1
     fi
 
     log "INFO" "AIS-catcher package installation completed"
+}
+
+# Resolve which .deb package to use for this system and drive download_and_install_deb.
+install_package_method() {
+    local system_info
+    system_info=$(get_system_info)
+    log "INFO" "Detected system: $system_info"
+
+    # Declare separately so the assignment exit-code is not masked by 'local'.
+    local package
+    package=$(check_package_availability "$system_info") || true
+
+    if [ -z "$package" ]; then
+        log "WARN" "No pre-built package available for $system_info"
+        return 1
+    fi
+
+    log "INFO" "Package available: $package"
+
+    # Install minimal dependencies for package installation
+    log "INFO" "Installing minimal dependencies for package installation"
+    apt-get install -y curl || error_exit "Failed to install minimal dependencies"
+
+    download_and_install_deb "$package" || return 1
+    log "INFO" "AIS-catcher installation from package completed successfully"
 }
 
 ################################################################################
@@ -468,8 +590,6 @@ setup_configuration() {
     log "INFO" "Setting up configuration files"
     mkdir -p "$CONFIG_DIR" || error_exit "Failed to create config directory"
 
-    download_webassets_common || error_exit "Failed to download webassets"
-
     if [[ ! -f "$CONFIG_FILE" ]]; then
         echo '{"config":"aiscatcher","version":1,"screen":0,"verbose":true,"verbose_time":60,"sharing":true,"udp":[],"tcp":[],"server":{"active":false,"plugin_dir":"/etc/AIS-catcher/plugins","cdn":"/etc/AIS-catcher/webassets","file":"/etc/AIS-catcher/stat.bin","realtime":false,"geojson":false,"prome":false,"port":"8100","backup":"10","context":"settings"},"rtlsdr":{"tuner":"auto","bandwidth":"192K","sample_rate":"1536K","biastee":false,"rtlagc":true},"airspyhf":{"threshold":"low","preamp":false},"rtltcp":{"protocol":"none","sample_rate":"288K","bandwidth":"0","rtlagc":false}}' | tee "$CONFIG_FILE" > /dev/null || error_exit "Failed to create config.json"
     fi
@@ -486,17 +606,102 @@ EOF
 # SYSTEMD SERVICE FUNCTIONS (Common to both installation methods)
 ################################################################################
 
+# Install the reboot watchdog poll script
+install_reboot_script() {
+    local script_path="${LIB_DIR}/wait-and-reboot.sh"
+
+    mkdir -p "$LIB_DIR" || error_exit "Failed to create lib directory"
+
+    cat > "$script_path" << 'SCRIPT'
+#!/bin/bash
+# Schedule a reboot in 5 minutes; cancel it if AIS-catcher recovers in time.
+# Checks every 10 seconds; cancels the pending shutdown if the service comes
+# back active (e.g. after manual "systemctl reset-failed + start" intervention).
+# To cancel a pending reboot manually: shutdown -c
+REBOOT_MINUTES=5
+shutdown -r "+${REBOOT_MINUTES}" "AIS-catcher failed repeatedly - rebooting in ${REBOOT_MINUTES} minutes. To cancel: shutdown -c"
+for i in $(seq 30); do
+    sleep 10
+    if systemctl is-active --quiet ais-catcher.service; then
+        shutdown -c
+        exit 0
+    fi
+done
+SCRIPT
+
+    chmod 755 "$script_path" || error_exit "Failed to set permissions on reboot script"
+    log "INFO" "Reboot watchdog script installed to ${script_path}"
+}
+
 # Setup systemd service
 setup_systemd_service() {
     log "INFO" "Setting up systemd service"
-    
-    # Build service file content conditionally based on SKIP_USER flag
+
+    install_reboot_script
+
+    # Write the reboot watchdog unit — fires only when OnFailure is triggered (StartLimitBurst > 0)
+    # Type=simple: systemd spawns the script and does not wait for it to exit, which avoids
+    # hitting TimeoutStartSec (90s default) during the 5-minute cancellation window.
+    cat > "$REBOOT_SERVICE_FILE" << EOF
+[Unit]
+Description=Reboot system due to repeated AIS-catcher failures
+
+[Service]
+Type=simple
+ExecStart=${LIB_DIR}/wait-and-reboot.sh
+EOF
+    log "INFO" "Reboot watchdog service written to ${REBOOT_SERVICE_FILE}"
+
+    # Preserve existing burst/interval/restart from current service file if present
+    local burst=0
+    local interval=0
+    local restart_policy="always"
+    if [[ -f "$SERVICE_FILE" ]]; then
+        burst=$(grep "^StartLimitBurst=" "$SERVICE_FILE" | cut -d= -f2 || echo 0)
+        interval=$(grep "^StartLimitIntervalSec=" "$SERVICE_FILE" | cut -d= -f2 || echo 0)
+        local existing_restart
+        existing_restart=$(grep "^Restart=" "$SERVICE_FILE" | cut -d= -f2 || true)
+        burst=${burst:-0}
+        interval=${interval:-0}
+        [[ "$burst" =~ ^[0-9]+$ ]] || burst=0
+        [[ "$interval" =~ ^[0-9]+$ ]] || interval=0
+        restart_policy=${existing_restart:-always}
+        log "INFO" "Preserving existing service limits: burst=${burst} interval=${interval}s restart=${restart_policy}"
+    fi
+
+    # Apply explicitly requested toggle overrides when combined with an installation
+    if [[ "$SET_REBOOT" == "true" ]]; then
+        burst="$REBOOT_BURST"
+        interval="$REBOOT_INTERVAL"
+        log "INFO" "Overriding watchdog settings: burst=${burst} interval=${interval}s"
+    elif [[ "$SET_REBOOT" == "false" ]]; then
+        burst=0
+        interval=0
+        log "INFO" "Disabling watchdog as requested"
+    fi
+    if [[ "$SET_AUTO_RESTART" == "true" ]]; then
+        restart_policy="always"
+        log "INFO" "Overriding auto-restart: always"
+    elif [[ "$SET_AUTO_RESTART" == "false" ]]; then
+        restart_policy="no"
+        log "INFO" "Disabling auto-restart as requested"
+    fi
+
+    # Build main service file content
+    # OnFailure= is only meaningful when StartLimitBurst > 0; with burst=0 the service
+    # restarts indefinitely via Restart=always and OnFailure would fire on every crash.
+    local on_failure_line=""
+    if [[ "${burst}" -gt 0 ]]; then
+        on_failure_line="OnFailure=${REBOOT_SERVICE_NAME}"
+    fi
     local service_content="[Unit]
 Description=AIS-catcher Service
 After=network.target
+${on_failure_line:+${on_failure_line}$'\n'}StartLimitIntervalSec=${interval}
+StartLimitBurst=${burst}
 
 [Service]"
-    
+
     # Only add User/Group directives if not skipping user creation
     if [ "$SKIP_USER" = false ]; then
         service_content+="
@@ -504,16 +709,15 @@ User=aiscatcher
 Group=aiscatcher
 SupplementaryGroups=plugdev dialout"
     fi
-    
+
     service_content+="
-ExecStart=/bin/bash -c '/usr/bin/AIS-catcher -G system on -o 0 -C ${CONFIG_FILE} \$(/bin/grep -v \"^#\" ${CMD_FILE} | /bin/grep -v \"^[[:space:]]*\$\" | tr -d \"\\r\" | /usr/bin/tr \"\\n\" \" \")'
-Restart=always
+ExecStart=/bin/bash -c '/usr/bin/AIS-catcher -G system on -o 0 -C ${CONFIG_FILE} \$\$(/bin/grep -v \"^#\" ${CMD_FILE} | /bin/grep -v \"^[[:space:]]*\$\$\" | tr -d \"\\r\" | /usr/bin/tr \"\\n\" \" \")'
+Restart=${restart_policy}
 RestartSec=10
-StartLimitBurst=0
 
 [Install]
 WantedBy=multi-user.target"
-    
+
     echo "$service_content" | tee "$SERVICE_FILE" > /dev/null || error_exit "Failed to create service file"
     systemctl daemon-reload || error_exit "Failed to reload systemd"
 }
@@ -533,6 +737,11 @@ stop_disable_and_save_service_state() {
         else
             log "WARN" "Failed to stop $SERVICE_NAME"
         fi
+    elif systemctl is-failed --quiet "$SERVICE_NAME" 2>/dev/null; then
+        # Service is in a failed/crash-loop state — it was intended to be running
+        was_active=true
+        log "INFO" "$SERVICE_NAME is in failed state, resetting before update"
+        systemctl reset-failed "$SERVICE_NAME" || log "WARN" "Failed to reset failed state"
     else
         log "INFO" "$SERVICE_NAME is not active, no need to stop"
     fi
@@ -580,11 +789,16 @@ restore_service_state() {
     
     # Then start if it was active
     if [[ "$was_active" == true ]]; then
+        # Clear any stale failed state from before the update so start isn't blocked
+        systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || true
         if systemctl start "$SERVICE_NAME"; then
             log "INFO" "$SERVICE_NAME started successfully"
-            # Give service a moment to start and check status
-            sleep 2
-            if systemctl is-active --quiet "$SERVICE_NAME"; then
+            local started=false
+            for i in {1..10}; do
+                systemctl is-active --quiet "$SERVICE_NAME" && { started=true; break; }
+                sleep 1
+            done
+            if [[ "$started" == true ]]; then
                 log "INFO" "$SERVICE_NAME is running properly"
             else
                 log "WARN" "$SERVICE_NAME may have failed to start properly"
@@ -613,11 +827,13 @@ parse_arguments() {
             -p|--package)
                 log "INFO" "Package installation requested"
                 INSTALL_PACKAGE=true
+                INSTALL_REQUESTED=true
                 shift
                 ;;
             -b|--branch)
                 if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
                     BRANCH="$2"
+                    INSTALL_REQUESTED=true
                     log "INFO" "Will clone branch: ${BRANCH}"
                     shift 2
                 else
@@ -634,38 +850,48 @@ parse_arguments() {
                 SKIP_USER=true
                 shift
                 ;;
+            --set-reboot-on-failure)
+                SET_REBOOT="true"
+                if [[ -n "${2:-}" && "${2}" =~ ^[0-9]+$ ]]; then
+                    REBOOT_BURST="$2"
+                    shift
+                fi
+                if [[ -n "${2:-}" && "${2}" =~ ^[0-9]+$ ]]; then
+                    REBOOT_INTERVAL="$2"
+                    shift
+                fi
+                shift
+                ;;
+            --unset-reboot-on-failure)
+                SET_REBOOT="false"
+                shift
+                ;;
+            --set-auto-restart)
+                SET_AUTO_RESTART="true"
+                shift
+                ;;
+            --unset-auto-restart)
+                SET_AUTO_RESTART="false"
+                shift
+                ;;
             -h|--help)
                 usage
                 ;;
             *)
-                log "WARN" "Unknown option: $1"
+                log "ERROR" "Unknown option: $1"
                 log "INFO" "Use --help for usage information"
-                shift
+                exit 1
                 ;;
         esac
     done
+
+    # Warn if --branch is ignored because --package was also specified
+    if [[ "$INSTALL_PACKAGE" == true && "$BRANCH" != "main" ]]; then
+        log "WARN" "--branch is ignored when --package is used (pre-built packages are always Edge)"
+    fi
 }
 
-# Install from pre-built package
-install_from_package_method() {
-    local system_info=$(get_system_info)
-    log "INFO" "Detected system: $system_info"
-    
-    local package=$(check_package_availability "$system_info")
-    
-    if [ -z "$package" ]; then
-        error_exit "Package installation requested but no package available for $system_info. Consider building from source: see https://docs.aiscatcher.org/installation/ubuntu-debian/#install-from-source"
-    fi
-    
-    log "INFO" "Package available: $package"
-    
-    # Install minimal dependencies for package installation and webassets download
-    log "INFO" "Installing minimal dependencies for package installation"
-    apt-get install -y curl unzip || error_exit "Failed to install minimal dependencies"
-    
-    install_from_package "$package"
-    log "INFO" "AIS-catcher installation from package completed successfully"
-}
+
 
 # Install from source
 install_from_source_method() {
@@ -681,20 +907,22 @@ install_from_source_method() {
     log "INFO" "AIS-catcher source installation completed successfully"
 }
 
-# Install binary (delegates to package or source method)
+# Install binary (delegates to package or source method, with source fallback)
 install_binary() {
     if [ "$INSTALL_PACKAGE" = true ]; then
-        install_from_package_method
-    else
-        install_from_source_method
+        if install_package_method; then
+            return 0
+        fi
+        log "WARN" "Package installation failed, falling back to source build..."
     fi
+    install_from_source_method
 }
 
 # Configure installation (user, config, permissions)
 configure_installation() {
     setup_aiscatcher_user
     setup_configuration
-    
+
     # Ensure correct ownership after config files are created (skip if running as root)
     if [ "$SKIP_USER" = false ]; then
         log "INFO" "Ensuring correct ownership of configuration directory"
@@ -704,32 +932,55 @@ configure_installation() {
 
 # Main function
 main() {
-    # Phase 1: Pre-flight checks and setup
+    # Phase 1: Logging and cleanup trap (TMP_DIR is created at script startup)
     log "INFO" "Starting AIS-catcher installation script"
-    check_existing_service
     trap cleanup EXIT
-    
-    # Phase 2: Parse arguments
+
+    # Phase 2: Parse arguments first — ensures --help exits cleanly and standalone
+    # toggle flags don't hit the installation pre-flight checks unnecessarily.
     parse_arguments "$@"
-    
-    # Phase 3: System preparation
+
+    # Phase 3: Cancel any pending watchdog — must happen before any service state change,
+    # whether we're on the standalone-toggle path or the full-install path.
+    if [ "$SKIP_SYSTEMD" = false ]; then
+        cancel_reboot_watchdog
+    fi
+
+    # Phase 4: Handle standalone toggles (no reinstall needed).
+    # If -p or -b was also passed (INSTALL_REQUESTED=true), skip early-exit and let
+    # setup_systemd_service() apply the overrides inline during the installation instead.
+    if [[ -n "$SET_REBOOT" && "$INSTALL_REQUESTED" == "false" ]]; then
+        handle_reboot_setting
+        exit 0
+    fi
+
+    if [[ -n "$SET_AUTO_RESTART" && "$INSTALL_REQUESTED" == "false" ]]; then
+        handle_auto_restart_setting
+        exit 0
+    fi
+
+    # Phase 5: Pre-flight checks (only reached for actual installations)
+    check_existing_service
+
+    # Phase 6: System preparation
     apt-get update || error_exit "Failed to update package lists"
-    
-    # Phase 4: Stop existing service if needed
+
+    # Phase 7: Stop existing service if needed
     if [ "$SKIP_SYSTEMD" = false ]; then
         stop_disable_and_save_service_state
     fi
-    
-    # Phase 5: Install binary (package or source)
+
+    # Phase 8: Install binary (package or source)
     install_binary
-    
-    # Phase 6: Post-install configuration
+    [[ -x /usr/bin/AIS-catcher ]] || error_exit "AIS-catcher binary not found after installation"
+
+    # Phase 9: Post-install configuration
     configure_installation
-    
-    # Phase 7: Setup and start service
+
+    # Phase 10: Setup and start service
     if [ "$SKIP_SYSTEMD" = false ]; then
         setup_systemd_service
-        
+
         if ! restore_service_state; then
             log "ERROR" "Failed to restore service state"
             exit 1
@@ -737,8 +988,8 @@ main() {
     else
         log "INFO" "Skipping systemd service installation (--no-systemd flag specified)"
     fi
-    
-    # Phase 8: Installation complete
+
+    # Phase 11: Installation complete
     log "INFO" "AIS-catcher installation completed successfully"
     display_installation_summary
 }
@@ -758,13 +1009,39 @@ display_installation_summary() {
     echo "    - Main config:      ${CONFIG_FILE}"
     echo "    - Command options:  ${CMD_FILE}"
     echo "    - Plugins:          ${PLUGIN_DIR}/"
-    echo "    - Web assets:       ${CONFIG_DIR}/webassets/"
     echo "    - Database schema:  ${DBMS_DIR}/create.sql"
     echo "    - Documentation:    ${README_DIR}/README.md"
     echo "    - License:          ${CONFIG_DIR}/LICENSE"
-    echo "  • Service file:       ${SERVICE_FILE}"
+    if [ "$SKIP_SYSTEMD" = false ]; then
+        echo "  • Service file:       ${SERVICE_FILE}"
+        echo "  • Reboot watchdog:    ${REBOOT_SERVICE_FILE}"
+        echo "  • Reboot script:      ${LIB_DIR}/wait-and-reboot.sh"
+    fi
     echo "  • Log file:           ${LOG_FILE}"
     echo ""
+    if [ "$SKIP_SYSTEMD" = false ]; then
+        echo -e "${COLOR_BOLD}REBOOT WATCHDOG:${COLOR_RESET}"
+        echo "  • Off by default — service restarts indefinitely without rebooting"
+        echo "  • When armed: reboots after N rapid restarts within a time window"
+        echo "  • Useful for recovering from unresolvable USB device failures"
+        echo "  • Re-run this script to toggle (no reinstall needed):"
+        echo -e "    ${COLOR_YELLOW}sudo $SCRIPT_NAME --set-reboot-on-failure${COLOR_RESET}           # 3 restarts in 30 min"
+        echo -e "    ${COLOR_YELLOW}sudo $SCRIPT_NAME --set-reboot-on-failure 5 3600${COLOR_RESET}   # 5 restarts in 60 min"
+        echo -e "    ${COLOR_YELLOW}sudo $SCRIPT_NAME --unset-reboot-on-failure${COLOR_RESET}        # disable"
+        echo "  • Settings stored directly in the service file: ${SERVICE_FILE}"
+        echo ""
+        echo -e "${COLOR_BOLD}AUTO-RESTART:${COLOR_RESET}"
+        echo "  • On by default — service restarts automatically after any crash (Restart=always)"
+        echo "  • Disable to prevent restart loops during troubleshooting"
+        echo "  • Re-run this script to toggle (no reinstall needed):"
+        echo -e "    ${COLOR_YELLOW}sudo $SCRIPT_NAME --set-auto-restart${COLOR_RESET}                # enable Restart=always"
+        echo -e "    ${COLOR_YELLOW}sudo $SCRIPT_NAME --unset-auto-restart${COLOR_RESET}              # disable Restart=no"
+        echo "  • If service locks up after failures, recover with:"
+        echo -e "    ${COLOR_YELLOW}systemctl reset-failed ${SERVICE_NAME} && systemctl start ${SERVICE_NAME}${COLOR_RESET}"
+        echo "  • To abort a pending reboot (during the 5-minute wait):"
+        echo -e "    ${COLOR_YELLOW}shutdown -c${COLOR_RESET}"
+        echo ""
+    fi
     
     if [ "$SKIP_SYSTEMD" = false ]; then
         echo -e "${COLOR_BOLD}SYSTEMD SERVICE MANAGEMENT:${COLOR_RESET}"

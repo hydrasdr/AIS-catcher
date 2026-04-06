@@ -6,21 +6,15 @@
 
 	<meta name="viewport"
 		content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0, user-scalable=no" />
+	<meta name="mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
 	<link rel="icon" type="image/x-icon" href="/favicon.ico">
 
-	<script src="cdn/npm/chart.js"></script>
-	<script src="cdn/npm/chartjs-plugin-annotation/dist/chartjs-plugin-annotation.min.js"></script>
+	<script src="lib.js?hash=8743a05854bcccafc0c3deb70ffd7afc"></script>
+	<link rel="stylesheet" href="lib.css?hash=fcddc372b683c9753d216d397f31c3ef" />
+	<link rel="stylesheet" href="flag-icons.css?hash=99530c13bfb3d255dc8c976ba302306c" />
 
-	<link href="cdn/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet" />
-	<script type="text/javascript" src="cdn/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
-
-	<link rel="stylesheet" href="cdn/gh/lipis/flag-icons@6.6.6/css/flag-icons.min.css" />
-
-	<script src="cdn/npm/ol@v10.0.0/dist/ol.js"></script>
-	<link rel="stylesheet" href="cdn/npm/ol@v10.0.0/ol.css">
-
-	<link rel="stylesheet" href="style.css?hash=c973aa424d5048a4dd5aa7485b0fb1e4" />
+	<link rel="stylesheet" href="style.css?hash=abc9548e0685c62329b1c38aafe7623c" />
 	<link rel="stylesheet" href="custom/config.css" />
 
 </head>
@@ -45,6 +39,7 @@
 				<i id="decoder_tab_mini" title="NMEA Decoder" onclick="activateTab(event,'decoder')"
 					class="decode_icon"></i>
 				<i id="about_tab_mini" title="About" onclick="activateTab(event,'about')" class="info_icon"></i>
+				<i id="webcontrol_tab_mini" title="Web Control" onclick="openWebControl()" class="play_circle_icon"></i>
 			</div>
 		</div>
 
@@ -60,8 +55,11 @@
 			<i id="screentoggle-id" class="fullscreen_icon" small-icon></i>
 		</div>
 
-		<div title="Connection status with server" id="pulse-id" class="header-pulse-ok">
-			<i class="link_icon small-icon"></i>
+		<div id="receiver-btn-wrap" style="display:none; position:relative; align-items:center;">
+			<div id="receiver-btn" class="header-icon" title="Select receiver" onclick="toggleReceiverDropdown(event)">
+				<i class="radio_icon small-icon"></i>
+			</div>
+			<div id="receiver-dropdown" class="receiver-dropdown" style="display:none"></div>
 		</div>
 	</div>
 	<nav id="menubar" class="nokiosk">
@@ -77,6 +75,7 @@
 		<div onclick="activateTab(event,'decoder')" id="decoder_tab"><i class="decode_icon"></i><span>Decoder</span>
 		</div>
 		<div onclick="activateTab(event,'about')" id="about_tab"><i class="info_icon"></i><span>About</span></div>
+		<div onclick="openWebControl()" id="webcontrol_tab"><i class="play_circle_icon"></i><span>Control</span></div>
 	</nav>
 
 	<div class="mainspace-container">
@@ -926,12 +925,20 @@
 						<canvas id="chart-vessels-minute"></canvas>
 					</div>
 					<div class="graph-panel">
-						<header>Frequency Shift (avg PPM per hour)</header>
-						<canvas id="chart-ppm"></canvas>
+						<header>Vessels per Hour</header>
+						<canvas id="chart-vessels-hour"></canvas>
+					</div>
+					<div class="graph-panel">
+						<header>Vessels per Day</header>
+						<canvas id="chart-vessels-day"></canvas>
 					</div>
 					<div class="graph-panel">
 						<header>Frequency Shift (avg PPM per minute)</header>
 						<canvas id="chart-ppm-minute"></canvas>
+					</div>
+					<div class="graph-panel">
+						<header>Frequency Shift (avg PPM per hour)</header>
+						<canvas id="chart-ppm"></canvas>
 					</div>
 					<div class="graph-panel">
 						<header>Signal Level (Min/Max dB per minute)</header>
@@ -968,8 +975,8 @@
 							<div class="ship-table-column-dropdown">
 								<button class="ship-table-column-dropdown-toggle" type="button"
 									id="shipTableColumnDropdownToggle">
-									<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960"
-										width="24px" fill="currentColor">
+									<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960"
+										width="16px" fill="currentColor">
 										<path
 											d="M760-760H599h5-4 160Zm-240 0q0-33 23.5-56.5T600-840h160q33 0 56.5 23.5T840-760v400h-80v-400H600v640q-33 0-56.5-23.5T520-200v-560ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h160q33 0 56.5 23.5T440-760v560q0 33-23.5 56.5T360-120H200Zm160-640H200v560h160v-560Zm0 0H200h160ZM760-40v-80h-80v-80h80v-80h80v80h80v80h-80v80h-80Z" />
 									</svg>
@@ -978,8 +985,8 @@
 								<div class="ship-table-column-dropdown-menu" id="shipTableColumnVisibilityMenu"></div>
 							</div>
 							<button class="ship-table-column-reset" id="shipTableColumnReset">
-								<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960"
-									width="24px" fill="currentColor ">
+								<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960"
+									width="16px" fill="currentColor">
 									<path
 										d="M280-200v-80h284q63 0 109.5-40T720-420q0-60-46.5-100T564-560H312l104 104-56 56-200-200 200-200 56 56-104 104h252q97 0 166.5 63T800-420q0 94-69.5 157T564-200H280Z" />
 								</svg> </button>
@@ -1392,7 +1399,7 @@
 	<div class="bottombar"></div>
 
 	<script src="custom/plugins.js"></script>
-	<script src="script.js?hash=9e287bccc877c20c749b0e930b743d65"></script>
+	<script src="script.js?hash=ed7758b2a2e7264247e5e2cc7d7c416c"></script>
 
 
 	<div class="overlay" onclick="toggleInfoPanel()"></div>
@@ -1405,7 +1412,7 @@
 			<div class="quick-links">
 				<a href="https://docs.aiscatcher.org" class="quick-link">
 					<svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px"
-						fill="#5f6368">
+						fill="#d1d5db">
 						<path
 							d="M280-280h280v-80H280v80Zm0-160h400v-80H280v80Zm0-160h400v-80H280v80Zm-80 480q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z" />
 					</svg>
@@ -1413,7 +1420,7 @@
 				</a>
 				<a href="https://github.com/jvde-github/AIS-catcher/discussions" class="quick-link">
 					<svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px"
-						fill="#5f6368">
+						fill="#d1d5db">
 						<path
 							d="M880-80 720-240H320q-33 0-56.5-23.5T240-320v-40h440q33 0 56.5-23.5T760-440v-280h40q33 0 56.5 23.5T880-640v560ZM160-473l47-47h393v-280H160v327ZM80-280v-520q0-33 23.5-56.5T160-880h440q33 0 56.5 23.5T680-800v280q0 33-23.5 56.5T600-440H240L80-280Zm80-240v-280 280Z" />
 					</svg>
@@ -1423,12 +1430,12 @@
 					<svg width="32px" height="32px" viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg">
 						<path fill-rule="evenodd" clip-rule="evenodd"
 							d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
-							fill="#24292f" />
+							fill="#d1d5db" />
 					</svg> <span>GitHub</span>
 				</a>
 				<a onclick="toggleInfoPanel(); showAboutDialog();" class="quick-link">
 					<svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px"
-						fill="#5f6368">
+						fill="#d1d5db">
 						<path
 							d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z" />
 					</svg>
@@ -1438,7 +1445,7 @@
 
 			<div class="info-panel-section">
 				<div class="link-list">
-					<a href="https://docs.aiscatcher.org/getting-started/overview/" " class=" link-item">
+					<a href="https://docs.aiscatcher.org/getting-started/overview/" class="link-item">
 						<span>Getting Started Guide</span>
 						<span class="arrow_right_alt_icon"></span>
 					</a>
@@ -1470,7 +1477,7 @@
 								<svg width="24" height="24" viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg">
 									<path fill-rule="evenodd" clip-rule="evenodd"
 										d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
-										fill="#24292f" />
+										fill="#d1d5db" />
 								</svg>
 							</a>
 							<a href="https://x.com/githubjvde" target="_blank" class="social-link">

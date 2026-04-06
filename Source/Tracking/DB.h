@@ -99,6 +99,8 @@ class DB : public StreamIn<JSON::JSON>,
 
 	void getShipJSON(const Ship &ship, std::string &content, long int now);
 	std::string getSinglePathJSON(int);
+	std::string getSinglePathJSONCompact(int);
+	std::string getSinglePathJSONCompactSince(int, std::time_t, std::time_t);
 	std::string getSinglePathGeoJSON(int);
 	bool isNextPathPoint(int idx, uint32_t mmsi, int count) { return idx != -1 && paths[idx].mmsi == mmsi && paths[idx].count < count; }
 
@@ -144,12 +146,12 @@ public:
 		}
 	}
 
-	void getBinary(std::vector<char> &);
 	std::string getShipJSON(int mmsi);
 	std::string getJSON(bool full = false);
 	std::string getJSONcompact(bool full = false);
 	std::string getPathJSON(uint32_t);
 	std::string getAllPathJSON();
+	std::string getAllPathJSONSince(std::time_t since);
 	std::string getPathGeoJSON(uint32_t);
 	std::string getAllPathGeoJSON();
 	std::string getMessage(uint32_t);
@@ -162,6 +164,7 @@ public:
 	void setServerMode(bool b) { server_mode = b; }
 	void setMsgSave(bool b) { msg_save = b; }
 	void setFilterOption(std::string &opt, std::string &arg) { filter.SetOption(opt, arg); }
+	void setFilter(const AIS::Filter &f) { filter = f; }
 
 	std::string getBinaryMessagesJSON() const;
 

@@ -82,7 +82,7 @@ namespace AIS
 		return c;
 	}
 
-	void NMEA::submitAIS(TAG &tag, int64_t t, uint64_t ssc, uint16_t sl, int thisstation)
+	void NMEA::submitAIS(TAG &tag, int64_t t, uint64_t ssc, uint16_t sl, int thisstation, int64_t toa)
 	{
 		bool checksum_error = aivdm.checksum != NMEAchecksum(aivdm.sentence);
 
@@ -106,6 +106,7 @@ namespace AIS
 				msg.Stamp();
 			else
 				msg.setRxTimeMicros(t);
+			msg.setTOA(toa);
 			msg.setOrigin(aivdm.channel, thisstation == -1 ? station : thisstation, own_mmsi);
 			msg.setStartIdx(ssc);
 			msg.setEndIdx(ssc + sl);
@@ -151,6 +152,7 @@ namespace AIS
 			msg.Stamp();
 		else
 			msg.setRxTimeMicros(t);
+		msg.setTOA(toa);
 		msg.setOrigin(aivdm.channel, thisstation == -1 ? station : thisstation, own_mmsi);
 
 		for (auto it = queue.begin(); it != queue.end(); it++)
@@ -315,7 +317,7 @@ namespace AIS
 
 		split(s);
 
-		if ((parts.size() != 13 && parts.size() != 12))
+		if ((parts.size() < 12 || parts.size() > 14))
 			return false;
 
 		const std::string &crc = parts[parts.size() - 1];
@@ -330,16 +332,18 @@ namespace AIS
 			}
 		}
 
-		std::string lat_quad = trim(parts[3]);
-		std::string lon_quad = trim(parts[5]);
+		std::string lat_quad = trim(parts[4]); // N/S
+		std::string lon_quad = trim(parts[6]); // E/W
+
 		if (lat_quad.empty() || lon_quad.empty())
 		{
 			error_msg = "NMEA: no coordinates in RMC";
 			return false;
 		}
 
-		GPS gps(GpsToDecimal(trim(parts[2]).c_str(), lat_quad[0], error),
-				GpsToDecimal(trim(parts[4]).c_str(), lon_quad[0], error), s, empty);
+		GPS gps(GpsToDecimal(trim(parts[3]).c_str(), lat_quad[0], error), // lat
+				GpsToDecimal(trim(parts[5]).c_str(), lon_quad[0], error), // lon
+				s, empty);
 
 		if (error)
 		{
@@ -405,7 +409,7 @@ namespace AIS
 		return true;
 	}
 
-	bool NMEA::processAIS(const std::string &str, TAG &tag, int64_t t, uint64_t ssc, uint16_t sl, int thisstation, int groupId, std::string &error_msg)
+	bool NMEA::processAIS(const std::string &str, TAG &tag, int64_t t, uint64_t ssc, uint16_t sl, int thisstation, int groupId, std::string &error_msg, int64_t toa)
 	{
 		int pos = str.find_first_of("$!");
 		if (pos == std::string::npos)
@@ -474,7 +478,7 @@ namespace AIS
 		aivdm.sentence = nmea;
 		aivdm.groupId = groupId;
 
-		submitAIS(tag, t, ssc, sl, thisstation);
+		submitAIS(tag, t, ssc, sl, thisstation, toa);
 
 		return true;
 	}
@@ -497,6 +501,7 @@ namespace AIS
 				int thisstation = -1;
 				uint64_t ssc = 0;
 				uint16_t sl = 0;
+				int64_t toa = 0;
 
 				t = 0;
 
@@ -526,6 +531,12 @@ namespace AIS
 						t = (int64_t)std::llround(ts * 1000000.0);
 					}
 					break;
+					case AIS::KEY_TOA:
+					{
+						double ts = p.Get().getFloat();
+						toa = (int64_t)std::llround(ts * 1000000.0);
+					}
+					break;
 					case AIS::KEY_STATION_ID:
 						thisstation = p.Get().getInt();
 						break;
@@ -553,8 +564,10 @@ namespace AIS
 					}
 				}
 
-				if (cls == "AIS" && dev == "AIS-catcher" && (uuid.empty() || suuid == uuid))
+				if (cls == "AIS" && (dev == "AIS-catcher" || dev == "dAISy-catcher") && (uuid.empty() || suuid == uuid))
 				{
+					if (dev == "dAISy-catcher" && toa != 0 && !stamp)
+						t = toa;
 
 					for (const auto &p : j->getProperties())
 					{
@@ -567,7 +580,7 @@ namespace AIS
 									std::string error;
 									const std::string &line = v.getString();
 
-									if (!processAIS(line, tag, t, ssc, sl, thisstation, 0, error))
+									if (!processAIS(line, tag, t, ssc, sl, thisstation, 0, error, toa))
 									{
 										Warning() << "NMEA [" << (tag.ipv4 ? (Util::Convert::IPV4toString(tag.ipv4) + " - ") : "") << thisstation << "] " << error << " (" << line << ")";
 									}
@@ -577,7 +590,7 @@ namespace AIS
 					}
 				}
 
-				if (dev == "AIS-catcher" && !message.empty())
+				if ((dev == "AIS-catcher" || dev == "dAISy-catcher") && !message.empty())
 				{
 					if (cls == "error")
 					{
@@ -694,7 +707,7 @@ namespace AIS
 				throw std::runtime_error("invalid message length: " + std::to_string(length_bits));
 			}
 
-			msg.clear();			
+			msg.clear();
 			msg.setRxTimeUnix(timestamp);
 			msg.setOrigin(channel, station, own_mmsi);
 			msg.setStartIdx(0);

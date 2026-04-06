@@ -1,5 +1,7 @@
 
 var interval,
+    activeReceiver = 0,
+    lastPathFetch = 0,
     paths = {},
     map,
     basemaps = {},
@@ -42,6 +44,7 @@ var hover_enabled_track = false,
     select_enabled_track = false,
     marker_tracks = new Set();
 
+var communityFeed, aboutMDpresent, context, center, shipcard;
 if (typeof window.loadPlugins === 'undefined') {
     window.loadPlugins = function () { };
     communityFeed = false;
@@ -275,11 +278,9 @@ function applyDefaultSettings() {
     restoreDefaultSettings();
 
     settings.android = android;
-
-    if (isAndroid()) settings.dark_mode = darkmode;
+    settings.dark_mode = darkmode;
 
     updateSortMarkers();
-    //setLatLonInDMS(settings.latlon_in_dms);
     setDarkMode(settings.dark_mode);
     setMetrics(settings.metric);
     updateMapLayer();
@@ -334,26 +335,26 @@ function decimalToDDM(l, isLatitude) {
 }
 
 // transformations - for overwrite
-getDimVal = (c) => {
+var getDimVal = (c) => {
     return settings.metric === "DEFAULT" || settings.metric === "SI" ? Number(c).toFixed(0) : Number(c * 3.2808399).toFixed(0);
 };
 
-getDimUnit = () => {
+var getDimUnit = () => {
     return settings.metric === "DEFAULT" || settings.metric === "SI" ? "m" : "ft";
 };
 
-getDistanceConversion = (c) => (settings.metric === "DEFAULT" ? c : settings.metric === "SI" ? c * 1.852 : c * 1.15078);
-getDistanceVal = (c) => Number(getDistanceConversion(c)).toFixed(1).toLocaleString();
-getDistanceUnit = () => (settings.metric === "DEFAULT" ? "nmi" : settings.metric === "SI" ? "km" : "mi");
-getSpeedVal = (c) => (settings.metric === "DEFAULT" ? Number(c).toFixed(1) : settings.metric === "SI" ? Number(c * 1.852).toFixed(1) : Number(c * 1.151).toFixed(1));
-getSpeedUnit = () => (settings.metric === "DEFAULT" ? "kts" : settings.metric === "SI" ? "km/h" : "mph");
-getShipDimension = (ship) => ship.to_bow != null && ship.to_stern != null && ship.to_port != null && ship.to_starboard != null
+var getDistanceConversion = (c) => (settings.metric === "DEFAULT" ? c : settings.metric === "SI" ? c * 1.852 : c * 1.15078);
+var getDistanceVal = (c) => Number(getDistanceConversion(c)).toFixed(1).toLocaleString();
+var getDistanceUnit = () => (settings.metric === "DEFAULT" ? "nmi" : settings.metric === "SI" ? "km" : "mi");
+var getSpeedVal = (c) => (settings.metric === "DEFAULT" ? Number(c).toFixed(1) : settings.metric === "SI" ? Number(c * 1.852).toFixed(1) : Number(c * 1.151).toFixed(1));
+var getSpeedUnit = () => (settings.metric === "DEFAULT" ? "kts" : settings.metric === "SI" ? "km/h" : "mph");
+var getShipDimension = (ship) => ship.to_bow != null && ship.to_stern != null && ship.to_port != null && ship.to_starboard != null
     ? getDimVal(ship.to_bow + ship.to_stern) + " " + getDimUnit() + " x " + getDimVal(ship.to_port + ship.to_starboard) + " " + getDimUnit()
     : null
 
 
 
-getLatValFormat = (ship) => {
+var getLatValFormat = (ship) => {
     const prefix = ship.approx ? "<i>" : "";
     const suffix = ship.approx ? "</i>" : "";
     let content = "";
@@ -373,7 +374,7 @@ getLatValFormat = (ship) => {
     return prefix + content + suffix;
 };
 
-getLonValFormat = (ship) => {
+var getLonValFormat = (ship) => {
     const prefix = ship.approx ? "<i>" : "";
     const suffix = ship.approx ? "</i>" : "";
     let content = "";
@@ -393,12 +394,12 @@ getLonValFormat = (ship) => {
     return prefix + content + suffix;
 };
 
-getEtaVal = (ship) => ("0" + ship.eta_month).slice(-2) + "-" + ("0" + ship.eta_day).slice(-2) + " " + ("0" + ship.eta_hour).slice(-2) + ":" + ("0" + ship.eta_minute).slice(-2);
-getShipName = (ship) => ship.shipname;
-getCallSign = (ship) => ship.callsign;
-getICAOfromHexIdent = (h) => h.toString(16).toUpperCase().padStart(6, '0')
-getICAO = (plane) => getICAOfromHexIdent(plane.hexident)
-includeShip = (ship) => true;
+var getEtaVal = (ship) => ("0" + ship.eta_month).slice(-2) + "-" + ("0" + ship.eta_day).slice(-2) + " " + ("0" + ship.eta_hour).slice(-2) + ":" + ("0" + ship.eta_minute).slice(-2);
+var getShipName = (ship) => ship.shipname;
+var getCallSign = (ship) => ship.callsign;
+var getICAOfromHexIdent = (h) => h.toString(16).toUpperCase().padStart(6, '0')
+var getICAO = (plane) => getICAOfromHexIdent(plane.hexident)
+var includeShip = (ship) => true;
 
 const getDeltaTimeVal = (s) => {
     const days = Math.floor(s / (24 * 3600));
@@ -652,7 +653,7 @@ var labelStyle = function (feature) {
     });
 };
 
-hoverCircleStyleFunction = function (feature) {
+var hoverCircleStyleFunction = function (feature) {
     const iconScale = settings.icon_scale || 1.0;
     const circleScale = settings.circle_scale || 6.0;
     const radiusScale = 1 + (circleScale - 2.0) * 0.08; // Scale radius slightly with line width
@@ -667,7 +668,7 @@ hoverCircleStyleFunction = function (feature) {
     });
 }
 
-selectCircleStyleFunction = function (feature) {
+var selectCircleStyleFunction = function (feature) {
     const iconScale = settings.icon_scale || 1.0;
     const circleScale = settings.circle_scale || 6.0;
     const radiusScale = 1 + (circleScale - 2.0) * 0.08; // Scale radius slightly with line width
@@ -932,10 +933,11 @@ let selectCircleFeature = undefined;
 
 
 async function fetchJSON(l, m) {
+    let response;
     try {
         response = await fetch(l + "?" + m);
     } catch (error) {
-        showialog("Error", error);
+        showDialog("Error", error);
     }
     return response.text();
 }
@@ -1002,7 +1004,7 @@ async function showNMEA(m) {
 }
 
 async function showVesselDetail(m) {
-    s = await fetchJSON("api/vessel", m);
+    let s = await fetchJSON("api/vessel", m);
     let obj = JSON.parse(s);
 
     let tableHtml = '<table class="mytable">';
@@ -1040,6 +1042,7 @@ function showBinaryMessageDialog(featureOrMmsi) {
     }
 
     showDialog(title, content);
+    document.getElementById("dialog-box").style.maxWidth = "500px";
 }
 
 function getBinaryMessageList(messages) {
@@ -1162,9 +1165,7 @@ function showMapMenu(event) {
     mapMenu.style.top = "50%";
     mapMenu.style.transform = "translate(-50%, -50%)";
 
-    document.addEventListener("click", function (event) {
-        hideMapMenu(event);
-    });
+    document.addEventListener("click", hideMapMenu);
 }
 
 const contextMenu = document.getElementById("context-menu");
@@ -1265,9 +1266,7 @@ function showContextMenu(event, mmsi, type, context) {
         contextMenu.style.top = adjustedY + "px";
     }
 
-    document.addEventListener("click", function (event) {
-        hideContextMenu();
-    });
+    document.addEventListener("click", hideContextMenu);
 }
 
 function showDialog(title, message) {
@@ -1283,6 +1282,7 @@ function showDialog(title, message) {
 function closeDialog() {
     var dialogBox = document.getElementById("dialog-box");
     dialogBox.classList.add("hidden");
+    dialogBox.style.maxWidth = "";
 }
 
 function showNotification(message) {
@@ -1537,11 +1537,17 @@ function headerClick() {
     window.open("https://www.aiscatcher.org");
 }
 
+function openWebControl() {
+    if (typeof webcontrol_http !== "undefined" && webcontrol_http) {
+        window.open(webcontrol_http, '_blank');
+    }
+}
+
 function updateMapLayer() {
 
     if (activeTileLayer) {
 
-        overlays = JSON.parse(JSON.stringify(settings.map_overlay));
+        var overlays = JSON.parse(JSON.stringify(settings.map_overlay));
         settings.map_overlay = JSON.parse(JSON.stringify(overlays));
 
         setMapOpacity();
@@ -1857,24 +1863,29 @@ function initMap() {
 
     triggerMapLayer();
 
+    let mapMoving = false;
+
+    map.on('movestart', function () {
+        mapMoving = true;
+        stopHover();
+    });
+
+    map.on('moveend', function (evt) {
+        mapMoving = false;
+        debouncedSaveSettings();
+        debouncedDrawMap();
+        if (communityFeed)
+            debounceUpdateCommunityFeed();
+    });
+
     map.on('pointermove', function (evt) {
-        if (evt.dragging) {
-            stopHover();
-            return;
-        }
+        if (evt.dragging || mapMoving) return;
         const pixel = map.getEventPixel(evt.originalEvent);
         handlePointerMove(pixel, evt.originalEvent.target);
     });
 
     map.on('click', function (evt) {
         handleClick(evt.pixel, evt.originalEvent.target, evt);
-    });
-
-    map.on('moveend', function (evt) {
-        debouncedSaveSettings();
-        debouncedDrawMap();
-        if (communityFeed)
-            debounceUpdateCommunityFeed();
     });
 
 
@@ -2026,7 +2037,7 @@ function ToggleFireworks() {
 
 function StartFireworks() {
     if (evtSourceMap == null) {
-        if (!realtime_enabled) {
+        if (typeof realtime_enabled === "undefined" || !realtime_enabled) {
             showDialog("Error", "Cannot run Firework Mode. Please ensure that AIS-catcher is running with -N REALTIME on.");
             return;
         }
@@ -2038,7 +2049,7 @@ function StartFireworks() {
             function (e) {
                 var jsonData = JSON.parse(e.data);
 
-                if (jsonData.hasOwnProperty("channel") ** jsonData.hasOwnProperty("lat") && jsonData.hasOwnProperty("lon")) {
+                if (jsonData.hasOwnProperty("channel") && jsonData.hasOwnProperty("lat") && jsonData.hasOwnProperty("lon")) {
                     addMarker(jsonData.lat, jsonData.lon, jsonData.channel);
                 }
             },
@@ -2083,10 +2094,9 @@ function updateMarkerCountTooltip() {
         cHeli = 0,
         cSarte = 0;
 
-    for (let [key, m] of Object.entries(shipsDB)) {
-        if (key in shipsDB) {
-            let ship = shipsDB[key].raw;
-            switch (ship.shipclass) {
+    for (let key of Object.keys(shipsDB)) {
+        let ship = shipsDB[key].raw;
+        switch (ship.shipclass) {
                 case ShippingClass.ATON:
                     cAton++;
                     break;
@@ -2111,7 +2121,6 @@ function updateMarkerCountTooltip() {
                     else cStationary++;
                     break;
             }
-        }
     }
 
     flashNumber("statcard_stationary", cStationary);
@@ -2180,8 +2189,8 @@ function updateTablecard() {
 
     let shipKeys = Object.keys(shipsDB);
 
-    column = settings.tableside_column;
-    order = settings.tableside_order;
+    let column = settings.tableside_column;
+    let order = settings.tableside_order;
 
     const sortFunctions = {
         flag: (a, b) => compareString(shipsDB[a].raw.country, shipsDB[b].raw.country),
@@ -2201,53 +2210,47 @@ function updateTablecard() {
 
     var filter = document.getElementById('shipSearchSide').value.toLowerCase();
 
+    const rows = [];
     let addedRows = 0;
 
-    for (let i = 0; i < shipKeys.length; i++) {
-        if (addedRows > 100) break;
+    for (let i = 0; i < shipKeys.length && addedRows < 200; i++) {
+        const key = shipKeys[i];
+        if (!(key in shipsDB)) continue;
+        const ship = shipsDB[key].raw;
+        const shipName = String(getShipName(ship) || ship.mmsi);
+        if (filter && !shipName.toLowerCase().includes(filter)) continue;
 
-        let key = shipKeys[i];
-        if (key in shipsDB) {
-            let ship = shipsDB[key].raw;
-            let shipName = String(getShipName(ship) || ship.mmsi);
-            if (!filter || shipName.toLowerCase().includes(filter)) {
-                var row = tableBody.insertRow();
+        const dist = ship.distance ? (getDistanceVal(ship.distance) + (ship.repeat > 0 ? " (R)" : "")) : "";
+        const distTitle = ship.distance != null ? getDistanceVal(ship.distance) + " " + getDistanceUnit() + (ship.repeat > 0 ? " (R)" : "") : "";
+        const spd = ship.speed != null ? getSpeedVal(ship.speed) : "";
+        const spdTitle = ship.speed != null ? getSpeedVal(ship.speed) + " " + getSpeedUnit() : "";
 
-                row.addEventListener("mouseover", function (e) {
-                    startHover('ship', ship.mmsi);
-                });
-                row.addEventListener("mouseout", function (e) {
-                    stopHover();
-                });
-                row.addEventListener("click", function (e) {
-                    showShipcard('ship', ship.mmsi);
-                });
-                row.addEventListener("contextmenu", function (e) {
-                    showContextMenu(event, ship.mmsi, "ship", ["object", "object-map"]);
-                });
-
-                var cell1 = row.insertCell(0);
-                cell1.innerHTML = getFlagStyled(ship.country, "padding: 0px; margin: 0px; box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2); font-size: 16px;")
-
-                var cell2 = row.insertCell(1);
-                cell2.innerText = shipName;
-
-                var cell3 = row.insertCell(2);
-                cell3.innerHTML = ship.distance ? (getDistanceVal(ship.distance) + (ship.repeat > 0 ? " (R)" : "")) : null
-                cell3.title = ship.distance != null ? getDistanceVal(ship.distance) + " " + getDistanceUnit() + (ship.repeat > 0 ? " (R)" : "") : "";
-
-                var cell4 = row.insertCell(3);
-                cell4.innerHTML = ship.speed != null ? getSpeedVal(ship.speed) : "";
-                cell4.title = ship.speed != null ? getSpeedVal(ship.speed) + " " + getSpeedUnit() : "";
-
-                var cell5 = row.insertCell(4);
-                cell5.innerHTML = getTableShiptype(ship);
-
-                var cell6 = row.insertCell(5);
-                cell6.innerHTML = getDeltaTimeVal(ship.last_signal);
-            }
-        }
+        rows.push(`<tr data-mmsi="${ship.mmsi}">` +
+            `<td>${getFlagStyled(ship.country, "padding:0;margin:0;box-shadow:1px 1px 2px rgba(0,0,0,0.2);font-size:16px;")}</td>` +
+            `<td>${shipName}</td>` +
+            `<td title="${distTitle}">${dist}</td>` +
+            `<td title="${spdTitle}">${spd}</td>` +
+            `<td>${getTableShiptype(ship)}</td>` +
+            `<td>${getDeltaTimeVal(ship.last_signal)}</td>` +
+            `</tr>`);
+        addedRows++;
     }
+
+    tableBody.innerHTML = rows.join('');
+
+    tableBody.onmouseover = function(e) {
+        const tr = e.target.closest('tr[data-mmsi]');
+        if (tr) startHover('ship', parseInt(tr.dataset.mmsi));
+    };
+    tableBody.onmouseout = function(e) { stopHover(); };
+    tableBody.onclick = function(e) {
+        const tr = e.target.closest('tr[data-mmsi]');
+        if (tr) showShipcard('ship', parseInt(tr.dataset.mmsi));
+    };
+    tableBody.oncontextmenu = function(e) {
+        const tr = e.target.closest('tr[data-mmsi]');
+        if (tr) showContextMenu(e, parseInt(tr.dataset.mmsi), "ship", ["object", "object-map"]);
+    };
 }
 
 function flashNumber(id, newValue) {
@@ -2395,12 +2398,13 @@ function showServerErrors() {
 }
 
 async function fetchAbout() {
+    let response;
     try {
         response = await fetch("about.md");
     } catch (error) {
         return;
     }
-    aboutmd = await response.text();
+    let aboutmd = await response.text();
     return aboutmd;
 }
 
@@ -2419,16 +2423,17 @@ async function fetchRange(forcefetch = false) {
 
     range_update_time = now;
 
+    let response, h;
     try {
-        response = await fetch("api/history_full.json");
+        response = await fetch("api/history_full.json?receiver=" + activeReceiver);
         h = await response.json();
     } catch (error) {
         settings.show_range = false;
-        setPulseError();
+
         return;
     }
 
-    setPulseOk();
+
 
     range_outline = [];
     range_outline_short = [];
@@ -2440,21 +2445,21 @@ async function fetchRange(forcefetch = false) {
 
     for (let i = 0; i < N; i++) {
         let m = 0;
-        for (j = 0; j < h.minute.stat.length; j++) {
+        for (let j = 0; j < h.minute.stat.length; j++) {
             m = Math.max(m, h.minute.stat[j].radar_a[i]);
             m = Math.max(m, h.minute.stat[j].radar_b[i]);
         }
 
         range_short.push(m);
 
-        for (j = 0; j < h.hour.stat.length; j++) {
+        for (let j = 0; j < h.hour.stat.length; j++) {
             m = Math.max(m, h.hour.stat[j].radar_a[i]);
             m = Math.max(m, h.hour.stat[j].radar_b[i]);
         }
 
         const additionalDays = settings.range_timeframe == "7d" ? 7 : settings.range_timeframe == "30d" ? 30 : 0;
 
-        for (j = 0; j < Math.min(additionalDays, h.day.stat.length); j++) {
+        for (let j = 0; j < Math.min(additionalDays, h.day.stat.length); j++) {
             m = Math.max(m, h.day.stat[j].radar_a[i]);
             m = Math.max(m, h.day.stat[j].radar_b[i]);
         }
@@ -2488,7 +2493,7 @@ async function fetchRange(forcefetch = false) {
     }
 
     range_outline = range_outline.map(point => ol.proj.fromLonLat(point));
-    range_outline_short = range_outline_short.map(point => 0 * ol.proj.fromLonLat(point));
+    range_outline_short = range_outline_short.map(point => ol.proj.fromLonLat(point));
 }
 
 let rangeFeature = undefined;
@@ -2624,208 +2629,6 @@ function updateDistanceCircles() {
     }
 }
 
-/*
-let view_offset = 0;
- 
-function readUint8(view) {
-const val = view.getUint8(view_offset);
-view_offset += 1;
-return val;
-}
- 
-function readUint16(view) {
-const val = view.getUint16(view_offset);
-view_offset += 2;
-return val;
-}
- 
-function readUint32(view) {
-const val = view.getUint32(view_offset);
-view_offset += 4;
-return val;
-}
- 
-function readUint64(view) {
-const high = readUint32(view);
-const low = readUint32(view);
-return high * 2 ** 32 + low;
-}
- 
-function readInt8(view) {
-const val = view.getInt8(view_offset);
-view_offset += 1;
-return val;
-}
- 
-function readInt16(view) {
-const val = view.getInt16(view_offset);
-view_offset += 2;
-return val;
-}
- 
-function readInt32(view) {
-const val = view.getInt32(view_offset);
-view_offset += 4;
-return val;
-}
- 
-function readInt64(view) {
-const high = readInt32(view);
-const low = readUint32(view);
-return high * 2 ** 32 + low;
-}
- 
-function readString(view) {
-const length = readUint8(view);
-let str = "";
-for (let i = 0; i < length; i++) {
-    str += String.fromCharCode(readUint8(view));
-}
-return str;
-}
- 
-function readFloat(view) {
-return readInt16(view) / 1000.0;
-}
- 
-function readFloatLow(view) {
-return readInt16(view) / 10.0;
-}
- 
-function readLatLon(view) {
-const lat = readInt32(view) / 6000000.0;
-const lon = readInt32(view) / 6000000.0;
-return { lat, lon };
-}
- 
-function deserialize(view, time) {
-function setNullIf(value, condition) {
-    if (value == condition) return null;
-    return value;
-}
- 
-function setNullIfLess(value, condition) {
-    if (value < condition) return null;
-    return value;
-}
- 
-function setNullIfGreater(value, condition) {
-    if (value > condition) return null;
-    return value;
-}
- 
-// Now, deserialize the Ship structure
-const ship = {};
-ship.mmsi = readUint32(view);
-const latLon = readLatLon(view);
-ship.lat = setNullIfGreater(latLon.lat, 90);
-ship.lon = setNullIfGreater(latLon.lon, 180);
-ship.distance = setNullIfLess(readFloatLow(view), 0);
-ship.bearing = setNullIfLess(readFloatLow(view), 0);
-ship.level = setNullIfGreater(readFloatLow(view), 1023);
-ship.count = readInt16(view);
-ship.ppm = setNullIfGreater(readFloatLow(view), 1023);
- 
-let approx_validated = readInt8(view);
-ship.approx = (approx_validated & 1) == 1;
-ship.validated = (approx_validated >> 1) & (1 == 1);
- 
-ship.heading = setNullIfGreater(readFloatLow(view), 510);
-ship.cog = setNullIfGreater(readFloatLow(view), 359.9);
-ship.speed = setNullIfLess(readFloatLow(view), 0);
-ship.to_bow = setNullIf(readInt16(view), -1);
-ship.to_stern = setNullIf(readInt16(view), -1);
-ship.to_starboard = setNullIf(readInt16(view), -1);
-ship.to_port = setNullIf(readInt16(view), -1);
-ship.last_group = readUint64(view);
-ship.group_mask = readUint64(view);
-ship.shiptype = readInt16(view);
- 
-let shipclass_mmsitype = readUint8(view);
-ship.shipclass = shipclass_mmsitype >> 4;
-ship.mmsi_type = shipclass_mmsitype & 15;
- 
-ship.msg_type = readUint32(view);
-ship.channels = readInt8(view);
-ship.country = String.fromCharCode(readInt8(view), readInt8(view));
-ship.status = readInt8(view);
-ship.draught = setNullIfLess(readFloatLow(view), 0);
- 
-ship.eta_month = setNullIf(readInt8(view), 0);
-ship.eta_day = setNullIf(readInt8(view), 0);
-ship.eta_hour = setNullIf(readInt8(view), 24);
-ship.eta_minute = setNullIf(readInt8(view), 60);
- 
-ship.imo = setNullIf(readInt32(view), 0);
-ship.callsign = readString(view);
-ship.shipname = readString(view);
-ship.destination = readString(view);
-ship.received = readUint64(view);
-ship.last_signal = time - ship.received;
- 
-return ship;
-}
- 
-async function fetchShipsBinary(noDoubleFetch = true) {
-if (isFetchingShips && noDoubleFetch) {
-    console.log("A fetch operation is already running.");
-    return false;
-}
- 
-let ships = {};
-station = {};
-let arrayBuffer;
- 
-isFetchingShips = true;
-try {
-    response = await fetch("sb");
-    const blob = await response.blob();
-    arrayBuffer = await blob.arrayBuffer();
-} catch (error) {
-    setPulseError();
-    console.log("failed loading ships: " + error);
-    return false;
-} finally {
-    isFetchingShips = false;
-}
- 
-center = {};
- 
-setPulseOk();
- 
-shipsDB2 = {};
-let view = new DataView(arrayBuffer);
-view_offset = 0;
- 
-let time = readUint64(view);
-let count = readInt32(view);
- 
-let hasstation = readInt8(view) == 1;
-if (hasstation) {
-    station = readLatLon(view);
-    let own_mmsi = readUint32(view);
-}
- 
-while (view_offset < view.byteLength) {
-    const ship = deserialize(view, time);
-    if (includeShip(ship)) {
-        const entry = {};
-        entry.raw = ship;
-        shipsDB2[ship.mmsi] = entry;
-    }
-}
- 
-if (String(settings.center_point).toUpperCase() == "STATION") {
-    center = station;
-} else if (settings.center_point in shipsDB) {
-    let ship = shipsDB[settings.center_point].raw;
-    center = { lat: ship.lat, lon: ship.lon };
-}
- 
-return true;
-}
-*/
-
 function sanitizeString(input) {
     const map = {
         '&': '&amp;',
@@ -2846,11 +2649,13 @@ function formatTime(timestamp) {
 }
 
 async function fetchBinary() {
+    var standaloneBinaryMessages;
     binaryDB = {};
     standaloneBinaryMessages = []; // For messages not at ship locations
 
+    let response;
     try {
-        response = await fetch("api/binmsgs.json");
+        response = await fetch("api/binmsgs.json?receiver=" + activeReceiver);
         const messages = await response.json();
 
         // Group messages by MMSI
@@ -2877,10 +2682,10 @@ async function fetchBinary() {
             }
         });
 
-        setPulseOk();
+    
         return true;
     } catch (error) {
-        setPulseError();
+
         console.log("Failed loading binary:", error);
         return false;
     }
@@ -2895,10 +2700,11 @@ async function fetchShips(noDoubleFetch = true) {
     let ships = {};
 
     isFetchingShips = true;
+    let response;
     try {
-        response = await fetch("api/ships_array.json");
+        response = await fetch("api/ships_array.json?receiver=" + activeReceiver);
     } catch (error) {
-        setPulseError();
+
         console.log("failed loading ships: " + error);
         return false;
     } finally {
@@ -2906,7 +2712,7 @@ async function fetchShips(noDoubleFetch = true) {
     }
     ships = await response.json();
 
-    setPulseOk();
+
 
     const keys = [
         "mmsi",
@@ -2975,14 +2781,6 @@ async function fetchShips(noDoubleFetch = true) {
         s.off_position = (flags >> 26) & 3; // 0=unknown, 1=on position, 2=off position
         s.maneuver = (flags >> 28) & 3; // 0=not available, 1=no special, 2=special
 
-        // Check for discrepancies and show error
-        if (s.validated !== s.validated2) {
-            console.log(`Mismatch in validated: ${s.validated} != ${s.validated2}`);
-        }
-        if (s.channels !== s.channels2) {
-            console.log(`Mismatch in channels: ${s.channels} != ${s.channels2}`);
-        }
-
         if (includeShip(s)) {
             s.shipname = sanitizeString(s.shipname);
             s.callsign = sanitizeString(s.callsign);
@@ -3013,17 +2811,18 @@ async function fetchPlanes() {
 
     let planes = {};
 
+    let response;
     try {
         response = await fetch("api/planes_array.json");
     } catch (error) {
-        setPulseError();
+
         console.log("failed loading planes: " + error);
         return false;
     } finally {
     }
 
     planes = await response.json();
-    setPulseOk();
+
 
     const keys = [
         "hexident",
@@ -3212,9 +3011,9 @@ function average(d) {
 
     var c = 0;
 
-    for (a = 0; a < b.length; a++) {
+    for (var a = 0; a < b.length; a++) {
         if (b[a].x != 0) {
-            for (i = start; i < d.chart.data.datasets.length; i++) {
+            for (var i = start; i < d.chart.data.datasets.length; i++) {
                 if (!d.chart.getDatasetMeta(i).hidden) {
                     c += d.chart.data.datasets[i].data[a].y;
                 }
@@ -3434,7 +3233,7 @@ const graph_options_distance = {
     },
 };
 
-plot_count = {
+var plot_count = {
     type: "scatter",
     data: {
         datasets: [
@@ -3485,7 +3284,7 @@ plot_count = {
     options: graph_options_count,
 };
 
-plot_distance = {
+var plot_distance = {
     type: "scatter",
     data: {
         datasets: [
@@ -3531,7 +3330,7 @@ plot_distance = {
     options: graph_options_distance,
 };
 
-plot_single = {
+var plot_single = {
     type: "scatter",
     data: {
         datasets: [
@@ -3547,7 +3346,7 @@ plot_single = {
     options: graph_options_single,
 };
 
-plot_level = {
+var plot_level = {
     type: "scatter",
     data: {
         datasets: [
@@ -3674,10 +3473,11 @@ function initPlots() {
         { varName: "chart_days", id: "chart-days", config: plot_count, clone: true },
         { varName: "chart_ppm", id: "chart-ppm", config: plot_single, clone: true },
         { varName: "chart_ppm_minute", id: "chart-ppm-minute", config: plot_single, clone: true },
-        //{ varName: "chart_level", id: "chart-level", config: plot_level, clone: false },
         { varName: "chart_distance_hour", id: "chart-distance-hour", config: plot_distance, clone: false },
         { varName: "chart_distance_day", id: "chart-distance-day", config: plot_distance, clone: false },
-        { varName: "chart_minute_vessel", id: "chart-vessels-minute", config: plot_single, clone: false }
+        { varName: "chart_minute_vessel", id: "chart-vessels-minute", config: plot_single, clone: false },
+        { varName: "chart_hour_vessel", id: "chart-vessels-hour", config: plot_single, clone: false },
+        { varName: "chart_day_vessel", id: "chart-vessels-day", config: plot_single, clone: false }
     ];
 
     for (const { varName, id, ctx, config, clone } of chartConfigs) {
@@ -3696,8 +3496,8 @@ function initPlots() {
             console.error(`Failed to initialize chart ${id}:`, error);
         }
     }
-    chart_level = new Chart(document.getElementById("chart-level"), cloneChartConfig(plot_level));
-    chart_level_hour = new Chart(document.getElementById("chart-level-hour"), cloneChartConfig(plot_level));
+    window.chart_level = new Chart(document.getElementById("chart-level"), cloneChartConfig(plot_level));
+    window.chart_level_hour = new Chart(document.getElementById("chart-level-hour"), cloneChartConfig(plot_level));
 }
 
 function shipcardismax() {
@@ -3751,29 +3551,54 @@ function toggleShipcardSize() {
     }
 }
 
-function setPulseOk() {
-    const pulseEl = document.getElementById("pulse-id");
-    pulseEl.className = "header-pulse-ok";
-
-    const logoControl = document.getElementById('aiscatcher-logo-control');
-    if (logoControl) {
-        logoControl.classList.remove('connected', 'disconnected');
-        logoControl.classList.add('connected');
-        logoControl.title = `AIS-catcher - Connected`;
+function updateReceiverSelect(receivers) {
+    const wrap = document.getElementById("receiver-btn-wrap");
+    if (!wrap) return;
+    if (!receivers || receivers.length <= 1) {
+        wrap.style.display = "none";
+        return;
+    }
+    wrap.style.display = "flex";
+    const btn = document.getElementById("receiver-btn");
+    if (btn) btn.classList.toggle("active", activeReceiver !== 0);
+    const dd = document.getElementById("receiver-dropdown");
+    if (!dd) return;
+    if (dd.children.length !== receivers.length) {
+        dd.innerHTML = "";
+        for (const r of receivers) {
+            const item = document.createElement("div");
+            item.className = "receiver-dropdown-item" + (r.idx === activeReceiver ? " active" : "");
+            item.dataset.idx = r.idx;
+            item.textContent = r.label;
+            item.onclick = () => { onReceiverChange(r.idx); closeReceiverDropdown(); };
+            dd.appendChild(item);
+        }
+    } else {
+        for (const item of dd.children) {
+            item.classList.toggle("active", parseInt(item.dataset.idx) === activeReceiver);
+        }
     }
 }
 
-function setPulseError() {
-    const pulseEl = document.getElementById("pulse-id");
-    pulseEl.className = "header-pulse-error";
-
-    const logoControl = document.getElementById('aiscatcher-logo-control');
-    if (logoControl) {
-        logoControl.classList.remove('connected', 'disconnected');
-        logoControl.classList.add('disconnected');
-        logoControl.title = `AIS-catcher - Disconnected`;
-    }
+function toggleReceiverDropdown(event) {
+    event.stopPropagation();
+    const dd = document.getElementById("receiver-dropdown");
+    if (!dd) return;
+    dd.style.display = dd.style.display === "none" ? "block" : "none";
 }
+
+function closeReceiverDropdown() {
+    const dd = document.getElementById("receiver-dropdown");
+    if (dd) dd.style.display = "none";
+}
+
+function onReceiverChange(idx) {
+    activeReceiver = parseInt(idx, 10) || 0;
+    const btn = document.getElementById("receiver-btn");
+    if (btn) btn.classList.toggle("active", activeReceiver !== 0);
+    refresh_data();
+}
+
 
 
 let displayNames;
@@ -3804,14 +3629,15 @@ function getFlagStyled(country, style) {
 
 // fetches main statistics from the server
 async function fetchStatistics() {
+    let response;
     try {
-        response = await fetch("api/stat.json");
+        response = await fetch("api/stat.json?receiver=" + activeReceiver);
     } catch (error) {
-        setPulseError();
+
         return;
     }
-    statistics = await response.json();
-    setPulseOk();
+    let statistics = await response.json();
+
     return statistics;
 }
 
@@ -4002,7 +3828,7 @@ function updateChartLevel(chartData, timeframe, chartName, chart) {
     for (let i = 0; i < timeSeriesData.time.length; i++) {
         minLevelData.push({
             x: timeSeriesData.time[i],
-            y: timeSeriesData.stat[i].level_min === 0 ? null : timeSeriesData.stat[i].level_min
+            y: timeSeriesData.stat[i].level_min == null ? null : timeSeriesData.stat[i].level_min
         });
     }
     chart.data.datasets[1].data = minLevelData;
@@ -4011,7 +3837,7 @@ function updateChartLevel(chartData, timeframe, chartName, chart) {
     for (let i = 0; i < timeSeriesData.time.length; i++) {
         maxLevelData.push({
             x: timeSeriesData.time[i],
-            y: timeSeriesData.stat[i].level_max === 0 ? null : timeSeriesData.stat[i].level_max
+            y: timeSeriesData.stat[i].level_max == null ? null : timeSeriesData.stat[i].level_max
         });
     }
     chart.data.datasets[0].data = maxLevelData;
@@ -4048,17 +3874,18 @@ async function updatePlots() {
         u.textContent = unit;
     });
 
+    let response, b;
     if (true) {
         try {
-            response = await fetch("api/history_full.json");
+            response = await fetch("api/history_full.json?receiver=" + activeReceiver);
         } catch (error) {
-            setPulseError();
+    
         }
         b = await response.json();
     } else {
         b = JSON.parse(chart_json);
     }
-    setPulseOk();
+
 
     updateChartMulti(b, "second", chart_seconds);
     updateChartMulti(b, "minute", chart_minutes);
@@ -4070,7 +3897,8 @@ async function updatePlots() {
     updateChartLevel(b, "minute", "level", chart_level);
     updateChartLevel(b, "hour", "level", chart_level_hour);
     updateChartSingle(b, "minute", "vessels", chart_minute_vessel);
-
+    updateChartSingle(b, "hour", "vessels", chart_hour_vessel);
+    updateChartSingle(b, "day", "vessels", chart_day_vessel);
     //plot_radar.options.ticks.scale.max = 200;
     updateChartDistance(b, "hour", chart_distance_hour);
     updateChartDistance(b, "day", chart_distance_day);
@@ -4080,7 +3908,7 @@ async function updatePlots() {
 }
 
 function tableRowClick(m) {
-    ship = shipsDB[m].raw;
+    let ship = shipsDB[m].raw;
     if (ship.lat == null || ship.lon == null) return;
 
     selectMapTab(m);
@@ -4140,7 +3968,8 @@ async function updateShipTable() {
                 row.getElement().style.borderLeft = `10px solid ${borderColor}`;
             },
             data: data,
-            persistence: true,
+            layout: "fitDataTable",
+            persistence: { sort: true },
             pagination: "local",
             paginationSize: 50,
             rowHeight: 37,
@@ -4393,20 +4222,10 @@ async function updateShipTable() {
                 setShipTableColumns();
                 tableFirstTime = false;
             }
-
-            populateShipTableColumnVisibilityMenu();
         });
     } else {
-        if (data.length == 0) {
-            table.clearData();
-            return;
-        }
-        table.updateOrAddData(data);
-        table.getRows().forEach((row) => {
-            const mmsi = row.getData().mmsi;
-            if (!(mmsi in shipsDB)) row.delete();
-        });
         var sorters = table.getSorters();
+        table.replaceData(data);
         table.setSort(sorters);
     }
 }
@@ -4473,12 +4292,21 @@ function setShipTableColumns() {
     populateShipTableColumnVisibilityMenu();
 }
 
-document.getElementById("shipTableColumnDropdownToggle").addEventListener("click", populateShipTableColumnVisibilityMenu);
 const dropdownToggle = document.getElementById('shipTableColumnDropdownToggle');
 const dropdownMenu = document.getElementById('shipTableColumnVisibilityMenu');
+document.body.appendChild(dropdownMenu);
 
 function toggleDropdown() {
-    dropdownMenu.style.display = dropdownMenu.style.display === 'block' ? 'none' : 'block';
+    const isOpen = dropdownMenu.style.display === 'block';
+    if (isOpen) {
+        dropdownMenu.style.display = 'none';
+        return;
+    }
+    if (table) populateShipTableColumnVisibilityMenu();
+    const rect = dropdownToggle.getBoundingClientRect();
+    dropdownMenu.style.top = (rect.bottom + window.scrollY) + 'px';
+    dropdownMenu.style.right = (window.innerWidth - rect.right) + 'px';
+    dropdownMenu.style.display = 'block';
 }
 
 dropdownToggle.addEventListener('click', function (event) {
@@ -4489,6 +4317,10 @@ dropdownToggle.addEventListener('click', function (event) {
 document.addEventListener('click', function (event) {
     if (!dropdownMenu.contains(event.target) && event.target !== dropdownToggle) {
         dropdownMenu.style.display = 'none';
+    }
+    const wrap = document.getElementById('receiver-btn-wrap');
+    if (wrap && !wrap.contains(event.target)) {
+        closeReceiverDropdown();
     }
 });
 
@@ -4515,7 +4347,7 @@ function getTooltipContent(ship) {
         );
 
         if (meteoMessages.length > 0) {
-            content += getBinaryMessageContent(meteoMessages, true);
+            content += getBinaryMessageContent(meteoMessages);
         }
     }
 
@@ -4585,10 +4417,6 @@ function getTableShiptype(ship, opacity = 1) {
     return settings.table_shiptype_use_icon ? `<span class="${classValue}" style="${style}" title="${hint}"></span>` : hint;
 }
 
-function getIcon(ship) {
-    const { class: classValue, style } = getShipCSSClassAndStyle(ship);
-    return L.divIcon({ html: `<div class="${classValue}" style="${style}"></div>`, className: "undefined" });
-}
 
 function notImplemented() {
     showDialog("Warning", "Not implemented yet");
@@ -4686,7 +4514,7 @@ const stopHover = function () {
     if (hover_enabled_track) hideTrack(hoverMMSI);
 
     const dc = hover_feature && ('distancecircle' in hover_feature || 'rangering' in hover_feature);
-    const sf = hoverMMSI in shapeFeatures;
+    const sf = hoverType == 'ship' && hoverMMSI in shapeFeatures;
 
     hoverMMSI = undefined;
     hoverType = undefined;
@@ -4695,7 +4523,7 @@ const stopHover = function () {
 
     if (dc) rangeLayer.changed();
 
-    if (hoverType == 'ship' && sf)
+    if (sf)
         shapeLayer.changed();
 
     updateHoverMarker();
@@ -4750,143 +4578,94 @@ function getTooltipContentBinary(mmsiOrBinary) {
     return getBinaryMessageContent(mmsiOrBinary);
 }
 
-function getBinaryMessageContent(binary, showMultiple = false) {
+function getBinaryMessageContent(binary) {
     const messages = Array.isArray(binary) ? binary : [binary];
 
     if (messages.length === 0) return '';
 
     messages.sort((a, b) => b.timestamp - a.timestamp);
 
-    const messagesToShow = showMultiple ? Math.min(messages.length, 3) : 1;
+    const msg = messages[0].message;
 
-    let content = '<div class="meteo-tooltip" style="max-width: 320px;">';
+    const hasHydroData =
+        ('watercurrent' in msg && msg.watercurrent != null) ||
+        ('currentspeed' in msg && msg.currentspeed != null) ||
+        ('currentdir' in msg && msg.currentdir != null) ||
+        ('watertemp' in msg && msg.watertemp != null) ||
+        ('waterlevel' in msg && msg.waterlevel != null);
 
-    for (let i = 0; i < messagesToShow; i++) {
-        const msg = messages[i].message;
+    let content = '<div class="meteo-tooltip">';
+    content += `<div style="font-size: 11px; color: #FFA500; padding: 4px 0 3px; margin-bottom: 2px; display: flex; justify-content: space-between; align-items: center;">`;
+    content += `<span style="font-size: 11px;">${messages[0].formattedTime} - ${hasHydroData ? 'Meteo & Hydro' : 'Meteo'}</span>`;
+    if (messages.length > 1) {
+        content += `<span style="font-size: 10px; opacity: 0.5; font-style: italic;">+${messages.length - 1} more</span>`;
+    }
+    content += '</div>';
 
-        if (i > 0) {
-            content += '<hr style="margin: 10px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.3);">';
-        }
+    const row = (label, value) =>
+        `<div style="display: flex; justify-content: space-between; padding: 1px 0; white-space: nowrap;">` +
+        `<span style="font-size: 11px; opacity: 0.6; margin-right: 12px;">${label}</span>` +
+        `<span style="font-size: 11px; font-weight: bold;">${value}</span></div>`;
 
-        // Determine if it's just meteo or also has hydro data
-        const hasHydroData =
-            ('watercurrent' in msg && msg.watercurrent !== undefined && msg.watercurrent !== null) ||
-            ('currentspeed' in msg && msg.currentspeed !== undefined && msg.currentspeed !== null) ||
-            ('currentdir' in msg && msg.currentdir !== undefined && msg.currentdir !== null) ||
-            ('watertemp' in msg && msg.watertemp !== undefined && msg.watertemp !== null) ||
-            ('waterlevel' in msg && msg.waterlevel !== undefined && msg.waterlevel !== null);
-
-        content += `<h4 style="margin: 5px 0; font-size: 12px; color: #eee;">${messages[i].formattedTime} - ${hasHydroData ? 'Meteo & Hydro' : 'Meteo'}`;
-        if (messagesToShow > 1) {
-            content += ` (${i + 1}/${messagesToShow})`;
-        }
-        content += '</h4>';
-
-        content += '<div style="display: grid; grid-template-columns: 1fr 1fr; grid-gap: 5px;">';
-
-        // Wind data
-        if ('wspeed' in msg && msg.wspeed !== undefined && msg.wspeed !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Wind:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.wspeed.toFixed(1) + ' knots';
-            if ('wdir' in msg && msg.wdir !== undefined && msg.wdir !== null && msg.wdir !== 360) {
-                content += ' from ' + msg.wdir + '&deg';
-            }
-            content += '</div></div>';
-        }
-
-        // Air temperature
-        if ('airtemp' in msg && msg.airtemp !== undefined && msg.airtemp !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Air Temp:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.airtemp.toFixed(1) + '&deg C</div>';
-            content += '</div>';
-        }
-
-        // Air pressure
-        if ('pressure' in msg && msg.pressure !== undefined && msg.pressure !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Pressure:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.pressure.toFixed(1) + ' hPa';
-            if ('pressuretend' in msg && msg.pressuretend !== undefined && msg.pressuretend !== null) {
-                content += ' (' + ['steady', 'decreasing', 'increasing'][msg.pressuretend] + ')';
-            }
-            content += '</div></div>';
-        }
-
-        // Water current speed and direction
-        const currentSpeed = msg.watercurrent || msg.currentspeed;
-        const currentDir = msg.currentdir || msg.currentdirection;
-
-        if (currentSpeed !== undefined && currentSpeed !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Current:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + currentSpeed.toFixed(1) + ' knots';
-            if (currentDir !== undefined && currentDir !== null && currentDir !== 360) {
-                content += ' to ' + currentDir + '&deg';
-            }
-            content += '</div></div>';
-        }
-
-        // Water level
-        if ('waterlevel' in msg && msg.waterlevel !== undefined && msg.waterlevel !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Water Level:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.waterlevel.toFixed(2) + ' m</div>';
-            content += '</div>';
-        }
-
-        // Water temperature
-        if ('watertemp' in msg && msg.watertemp !== undefined && msg.watertemp !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Water Temp:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.watertemp.toFixed(1) + '&deg C</div>';
-            content += '</div>';
-        }
-
-        // Wave data
-        if ('waveheight' in msg && msg.waveheight !== undefined && msg.waveheight !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Wave:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.waveheight.toFixed(1) + ' m';
-            if ('wavedir' in msg && msg.wavedir !== undefined && msg.wavedir !== null && msg.wavedir !== 360) {
-                content += ' from ' + msg.wavedir + '&deg';
-            }
-            if ('waveperiod' in msg && msg.waveperiod !== undefined && msg.waveperiod !== null) {
-                content += ', ' + msg.waveperiod + 's';
-            }
-            content += '</div></div>';
-        }
-
-        // Swell data
-        if ('swellheight' in msg && msg.swellheight !== undefined && msg.swellheight !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Swell:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.swellheight.toFixed(1) + ' m';
-            if ('swelldir' in msg && msg.swelldir !== undefined && msg.swelldir !== null && msg.swelldir !== 360) {
-                content += ' from ' + msg.swelldir + '&deg';
-            }
-            if ('swellperiod' in msg && msg.swellperiod !== undefined && msg.swellperiod !== null) {
-                content += ', ' + msg.swellperiod + 's';
-            }
-            content += '</div></div>';
-        }
-
-        // Visibility
-        if ('visibility' in msg && msg.visibility !== undefined && msg.visibility !== null) {
-            content += '<div style="display: flex; justify-content: space-between; padding: 3px;">';
-            content += '<div style="font-size: 11px; color: #ccc;">Visibility:</div>';
-            content += '<div style="font-size: 11px; font-weight: bold;">' + msg.visibility.toFixed(1) + ' nm</div>';
-            content += '</div>';
-        }
-
-        // End grid
-        content += '</div>';
+    // Wind
+    if ('wspeed' in msg && msg.wspeed != null) {
+        let val = msg.wspeed.toFixed(1) + ' kts';
+        if ('wdir' in msg && msg.wdir != null && msg.wdir !== 360) val += ' / ' + msg.wdir + '&deg;';
+        content += row('Wind', val);
     }
 
-    // If there are more messages than we show
-    if (messages.length > messagesToShow) {
-        content += `<div style="text-align: center; font-size: 10px; margin-top: 5px; font-style: italic; color: #ccc;"></div>`;
+    // Air temperature
+    if ('airtemp' in msg && msg.airtemp != null) {
+        content += row('Air', msg.airtemp.toFixed(1) + '&deg;C');
+    }
+
+    // Pressure
+    if ('pressure' in msg && msg.pressure != null) {
+        let val = msg.pressure.toFixed(1) + ' hPa';
+        if ('pressuretend' in msg && msg.pressuretend != null) {
+            val += ' (' + ['steady', 'decreasing', 'increasing'][msg.pressuretend] + ')';
+        }
+        content += row('Pressure', val);
+    }
+
+    // Water current
+    const currentSpeed = msg.watercurrent || msg.currentspeed;
+    const currentDir = msg.currentdir || msg.currentdirection;
+    if (currentSpeed != null) {
+        let val = currentSpeed.toFixed(1) + ' kts';
+        if (currentDir != null && currentDir !== 360) val += ' / ' + currentDir + '&deg;';
+        content += row('Current', val);
+    }
+
+    // Water level
+    if ('waterlevel' in msg && msg.waterlevel != null) {
+        content += row('Water Level', msg.waterlevel.toFixed(2) + ' m');
+    }
+
+    // Water temperature
+    if ('watertemp' in msg && msg.watertemp != null) {
+        content += row('Water', msg.watertemp.toFixed(1) + '&deg;C');
+    }
+
+    // Waves
+    if ('waveheight' in msg && msg.waveheight != null) {
+        let val = msg.waveheight.toFixed(1) + ' m';
+        if ('wavedir' in msg && msg.wavedir != null && msg.wavedir !== 360) val += ' / ' + msg.wavedir + '&deg;';
+        if ('waveperiod' in msg && msg.waveperiod != null) val += ', ' + msg.waveperiod + 's';
+        content += row('Wave', val);
+    }
+
+    // Swell
+    if ('swellheight' in msg && msg.swellheight != null) {
+        let val = msg.swellheight.toFixed(1) + ' m';
+        if ('swelldir' in msg && msg.swelldir != null && msg.swelldir !== 360) val += ' / ' + msg.swelldir + '&deg;';
+        if ('swellperiod' in msg && msg.swellperiod != null) val += ', ' + msg.swellperiod + 's';
+        content += row('Swell', val);
+    }
+
+    // Visibility
+    if ('visibility' in msg && msg.visibility != null) {
+        content += row('Visibility', msg.visibility.toFixed(1) + ' nm');
     }
 
     content += '</div>';
@@ -5047,7 +4826,7 @@ const handlePointerMove = function (pixel, target) {
             );
 
             if (meteoMessages.length > 0) {
-                tooltipContent += getBinaryMessageContent(meteoMessages, true);
+                tooltipContent += getBinaryMessageContent(meteoMessages);
             }
 
             startHover('tooltip', tooltipContent, pixel, feature);
@@ -5130,6 +4909,7 @@ function saveSettings() {
 
     settings.shipcard_max = isShipcardMax();
     settings.shipcard_rows = selectedRows;
+    settings.activeReceiver = activeReceiver;
 
     // Save realtime filter MMSIs and background streaming state
     if (realtimeViewer) {
@@ -5174,6 +4954,7 @@ function loadSettings() {
             return;
         }
     }
+    if (settings.activeReceiver) activeReceiver = settings.activeReceiver;
     if (!shipcardismax()) toggleShipcardSize();
 
     if (settings.shipcard_rows && settings.shipcard_rows.length > 0) {
@@ -5192,7 +4973,6 @@ function loadSettings() {
     }
 
     settings.android = false;
-    // settings.kiosk = false;
 }
 
 function convertStringBooleansToActual() {
@@ -5324,6 +5104,7 @@ function unpinCenter() {
 
 async function showAllTracks() {
     show_all_tracks = true;
+    lastPathFetch = 0;
     select_enabled_track = hover_enabled_track = false;
     await fetchTracks();
     redrawMap();
@@ -5332,6 +5113,7 @@ async function showAllTracks() {
 
 function deleteAllTracks() {
     show_all_tracks = false;
+    lastPathFetch = 0;
     marker_tracks = new Set();
     let p = {};
 
@@ -5353,23 +5135,58 @@ function deleteAllTracks() {
 async function fetchTracks() {
     if (marker_tracks.size == 0 && show_all_tracks == false) return true;
 
+    let a;
+    let isDelta = false;
     try {
-        if (show_all_tracks) a = await fetch("api/allpath.json");
-        else {
-
+        if (show_all_tracks) {
+            const sinceParam = lastPathFetch > 0 ? "&since=" + lastPathFetch : "";
+            isDelta = sinceParam !== "";
+            a = await fetch("api/allpath.json?receiver=" + activeReceiver + sinceParam);
+        } else {
             for (var mmsi of marker_tracks) {
                 if (!(mmsi in shipsDB)) {
                     ToggleTrackOnMap(mmsi);
                 }
             }
-
             var mmsi_str = Array.from(marker_tracks).join(",");
-            a = await fetch("api/path.json?" + mmsi_str);
+            a = await fetch("api/path.json?" + mmsi_str + "&receiver=" + activeReceiver);
         }
-        paths = await a.json();
+
+        const newPaths = await a.json();
+
+        let maxTs = lastPathFetch;
+        for (const mmsi in newPaths)
+            for (const pt of newPaths[mmsi])
+                if (pt[3] > maxTs) maxTs = pt[3];
+        if (maxTs > lastPathFetch) lastPathFetch = maxTs;
+
+        if (!isDelta) {
+            paths = newPaths;
+        } else {
+            for (const mmsi in newPaths) {
+                if (!paths[mmsi]) {
+                    paths[mmsi] = newPaths[mmsi];
+                } else {
+                    for (const pt of newPaths[mmsi]) {
+                        const ts_start = pt[2];
+                        const idx = paths[mmsi].findIndex(p => p[2] === ts_start);
+                        if (idx >= 0) {
+                            paths[mmsi][idx][3] = pt[3];
+                        } else {
+                            paths[mmsi].unshift(pt);
+                        }
+                    }
+                }
+            }
+            for (const mmsi in paths) {
+                if (!(mmsi in shipsDB)) delete paths[mmsi];
+                else if (paths[mmsi].length > 250) paths[mmsi] = paths[mmsi].slice(0, 250);
+            }
+        }
     } catch (error) {
         console.log("Error loading path: " + error);
-        paths = {};
+        if (!isDelta) paths = {};
+        lastPathFetch = 0;
         return false;
     }
 
@@ -5417,7 +5234,7 @@ function isShipcardMax() {
 function getStringfromMsgType(m) {
     let s = "";
     let delim = "";
-    for (i = 1; i <= 27; i++)
+    for (let i = 1; i <= 27; i++)
         if ((m & (1 << i)) != 0) {
             s += delim + Number(i).toFixed(0);
             delim = ", ";
@@ -5430,7 +5247,7 @@ function getStringfromGroup(m) {
     let delim = "";
     let count = 0;
 
-    for (i = 0; i < 32; i++) {
+    for (let i = 0; i < 32; i++) {
         let mask = 1 << i;
         if ((m & mask) !== 0) {
             if (count == 4) {
@@ -5448,7 +5265,7 @@ function getStringfromGroup(m) {
 function getStringfromChannels(m) {
     let s = "";
     let delim = "";
-    for (i = 0; i <= 3; i++)
+    for (let i = 0; i <= 3; i++)
         if ((m & (1 << i)) != 0) {
             s += delim + String.fromCharCode(65 + i);
             delim = ", ";
@@ -6274,8 +6091,7 @@ function getPlaneSprite(plane) {
     return sprite;
 }
 
-var SpritesAll =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAABuCAYAAACgLRjpAAAAwnpUWHRSYXcgcHJvZmlsZSB0eXBlIGV4aWYAAHjabVBbDgMhCPznFD2CPHTxOG7XJr1Bj18UbHbbkjgMj4wA9NfzAbdhhAKSNy21lGQmVSo1I5rc2kRMMvGUmvElD6VHgSzF5tlDLdG/8vgRcNeM5ZOQ3qOwXwtVQl+/hMgdj4kGP0KohhCTFzAEWuxQqm7nFfa1wTL1BwNEr2P/xJtd78j2DxN1Rk6GzOoD8HgZuBlBQwtoMDWOLIZ5tqIf5N+dlsEbcl5ZgI6o50sAAAGEaUNDUElDQyBwcm9maWxlAAB4nH2RPUjDUBSFT1ulIhUFC1pxyFCd7KIijrUKRagQaoVWHUxe+gdNGpIUF0fBteDgz2LVwcVZVwdXQRD8AXEXnBRdpMT7kkKLGC883sd59xzeuw/wNypMNbvigKpZRjqZELK5VSH4Ch8iGMAQIhIz9TlRTMGzvu6pm+ouxrO8+/6sPiVvMsAnEMeZbljEG8Qzm5bOeZ84zEqSQnxOPGHQBYkfuS67/Ma56LCfZ4aNTHqeOEwsFDtY7mBWMlTiaeKoomqU78+6rHDe4qxWaqx1T/7CUF5bWeY6rVEksYgliBAgo4YyKrAQo10jxUSazhMe/hHHL5JLJlcZjBwLqEKF5PjB/+D3bM3C1KSbFEoA3S+2/TEGBHeBZt22v49tu3kCBJ6BK63trzaA2U/S620tegT0bwMX121N3gMud4DhJ10yJEcK0PIXCsD7GX1TDhi8BXrX3Lm1znH6AGRoVqkb4OAQGC9S9rrHu3s65/ZvT2t+P4Ewcqz7/a75AAANemlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNC40LjAtRXhpdjIiPgogPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iCiAgICB4bWxuczpzdEV2dD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL1Jlc291cmNlRXZlbnQjIgogICAgeG1sbnM6R0lNUD0iaHR0cDovL3d3dy5naW1wLm9yZy94bXAvIgogICAgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIgogICAgeG1sbnM6dGlmZj0iaHR0cDovL25zLmFkb2JlLmNvbS90aWZmLzEuMC8iCiAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iCiAgIHhtcE1NOkRvY3VtZW50SUQ9ImdpbXA6ZG9jaWQ6Z2ltcDpiNGQ1NGU4Ny1jZGQyLTQ0M2YtOWU2Mi1mYjJkYjFmOWNjOTkiCiAgIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6YWI4MDQ0MzItMTE2My00NGQ0LWE0MGUtNzUxMzE1YjZlMzZiIgogICB4bXBNTTpPcmlnaW5hbERvY3VtZW50SUQ9InhtcC5kaWQ6YjNhMDI1MzEtNmQ0OS00ZTE5LWE1NGYtOTE2OTE3MGYyMTMzIgogICBHSU1QOkFQST0iMi4wIgogICBHSU1QOlBsYXRmb3JtPSJNYWMgT1MiCiAgIEdJTVA6VGltZVN0YW1wPSIxNzM3ODI1Mjk4OTUwMzkxIgogICBHSU1QOlZlcnNpb249IjIuMTAuMzgiCiAgIGRjOkZvcm1hdD0iaW1hZ2UvcG5nIgogICB0aWZmOk9yaWVudGF0aW9uPSIxIgogICB4bXA6Q3JlYXRvclRvb2w9IkdJTVAgMi4xMCIKICAgeG1wOk1ldGFkYXRhRGF0ZT0iMjAyNTowMToyNVQxODoxNDo1OCswMTowMCIKICAgeG1wOk1vZGlmeURhdGU9IjIwMjU6MDE6MjVUMTg6MTQ6NTgrMDE6MDAiPgogICA8eG1wTU06SGlzdG9yeT4KICAgIDxyZGY6U2VxPgogICAgIDxyZGY6bGkKICAgICAgc3RFdnQ6YWN0aW9uPSJzYXZlZCIKICAgICAgc3RFdnQ6Y2hhbmdlZD0iLyIKICAgICAgc3RFdnQ6aW5zdGFuY2VJRD0ieG1wLmlpZDoxNTViZGM3Ny05OGRiLTRlZDctODU1MC1jYTMyZjgyZTk0ZGUiCiAgICAgIHN0RXZ0OnNvZnR3YXJlQWdlbnQ9IkdpbXAgMi4xMCAoTWFjIE9TKSIKICAgICAgc3RFdnQ6d2hlbj0iMjAyNS0wMS0yNVQxODoxNDo1OCswMTowMCIvPgogICAgPC9yZGY6U2VxPgogICA8L3htcE1NOkhpc3Rvcnk+CiAgPC9yZGY6RGVzY3JpcHRpb24+CiA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgCjw/eHBhY2tldCBlbmQ9InciPz5Kov3CAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH6QEZEQ46qIXsNAAAIABJREFUeNrtnXtc1HW+/1/f69xnALkoAgoIchGVi2IB4jVXs1TKy8nMbtbeitPpt8efpzrbXn5nz+a27W6P2lUPa7ZZbZpmaVtrZa1QkqgpCoiaCWIwIDAw1+98v9/P+YOJgJlhvjDDOdVvXo/HPHDm85nn6/Oe72s+3+t8BcIK65su00aT1rTRpA8V777Yu7T3xd4VMt74xE3a8YmbQsYrzmG0xTlMyHhlGoO2TGMIGW9+iUo7v0QVMp42o1CrzSgMGW+5Oke7XJ2jiEcrItLMFtDM5lANkAa9hQa9OXRfEXoLQsijgC0UEDIeA2xhQshjWWxh2dDxQLNbQLMhrJfewihcHpSC2U/jXrOoCQC4195LsuyyOIKc/TS3udY2AcDrqr8mVZhfDIo3PnGTxuVc1QQAKvX+pNbmHUHxinMYzRwS2wQAxyhzUmWtFBSvTGPQ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'
+var SpritesAll = 'icons.png'
 
 async function updateMap() {
     let ok = false;
@@ -6609,13 +6425,11 @@ function redrawMap() {
     drawStation(station);
     updateDistanceCircles();
 
-    //await plotRange();
-
 }
 function updateAllChartColors() {
     const chartsToUpdateMulti = [chart_minutes, chart_hours, chart_days, chart_seconds];
     const chartsToUpdateLevel = [chart_level, chart_level_hour];
-    const chartsToUpdateSingle = [chart_distance_day, chart_distance_hour, chart_ppm, chart_minute_vessel, chart_ppm_minute];
+    const chartsToUpdateSingle = [chart_distance_day, chart_distance_hour, chart_ppm, chart_minute_vessel, chart_ppm_minute, chart_hour_vessel, chart_day_vessel];
     const chartsToUpdateRadar = [chart_radar_day, chart_radar_hour];
 
     chartsToUpdateMulti.forEach((chart) => {
@@ -6721,7 +6535,6 @@ async function openFocus(m, z) {
     if (z) mapResetView(z);
     else mapResetView(14);
 
-    //showTrack(m);
 }
 
 function updateSettingsTab() {
@@ -7345,9 +7158,9 @@ function activateTab(b, a) {
     Array.from(document.getElementById("menubar").children).forEach((e) => (e.className = e.className.replace(" active", "")));
     Array.from(document.getElementById("menubar_mini").children).forEach((e) => (e.className = e.className.replace(" active", "")));
 
-    tabcontent = document.getElementsByClassName("tabcontent");
+    var tabcontent = document.getElementsByClassName("tabcontent");
 
-    for (i = 0; i < tabcontent.length; i++) tabcontent[i].style.display = "none";
+    for (var i = 0; i < tabcontent.length; i++) tabcontent[i].style.display = "none";
 
     document.getElementById(a).style.display = "block";
     if (a === "map") document.getElementById("tableside").style.display = "flex";
@@ -7767,14 +7580,8 @@ function setupAbout() {
 
     fetchAbout()
         .then((s) => {
-            var scriptElement = document.createElement("script");
-            scriptElement.src = "https://cdn.jsdelivr.net/npm/marked/marked.min.js";
-            document.head.appendChild(scriptElement);
-
-            scriptElement.onload = function () {
-                document.getElementById("about_content").innerHTML = marked.parse(s);
-                aboutContentLoaded = true;
-            };
+            document.getElementById("about_content").innerHTML = marked.parse(s);
+            aboutContentLoaded = true;
         })
         .catch((error) => {
             alert("Error loading about.md: " + error);
@@ -7879,46 +7686,58 @@ let rainviewerClouds = new ol.layer.Tile({
 async function refreshRainviewerLayers() {
     try {
         // Get latest timestamps from RainViewer API
-        const response = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+        const response = await fetch("https://api.rainviewer.com/public/weather-maps.json?_=" + Date.now());
         const data = await response.json();
 
         // Update radar layer
         const latestRadar = data.radar.past[data.radar.past.length - 1];
-        const radarSource = new ol.source.XYZ({
-            url: `https://tilecache.rainviewer.com/v2/radar/${latestRadar.time}/512/{z}/{x}/{y}/6/1_1.png`,
-            attributions: '<a href="https://www.rainviewer.com/api.html" target="_blank">RainViewer.com</a>'
-        });
-        rainviewerRadar.setSource(radarSource);
+        rainviewerRadar.setSource(new ol.source.XYZ({
+            url: `https://tilecache.rainviewer.com${latestRadar.path}/512/{z}/{x}/{y}/6/1_1.png`,
+            attributions: '<a href="https://www.rainviewer.com/api.html" target="_blank">RainViewer.com</a>',
+            crossOrigin: 'anonymous',
+            maxZoom: 7,
+        }));
 
         // Update clouds layer
-        const latestClouds = data.satellite.infrared[data.satellite.infrared.length - 1];
-        const cloudsSource = new ol.source.XYZ({
-            url: `https://tilecache.rainviewer.com/${latestClouds.path}/512/{z}/{x}/{y}/0/0_0.png`,
-            attributions: '<a href="https://www.rainviewer.com/api.html" target="_blank">RainViewer.com</a>'
-        });
-        rainviewerClouds.setSource(cloudsSource);
+        const latestClouds = data.satellite?.infrared?.[data.satellite.infrared.length - 1];
+        if (latestClouds) {
+            rainviewerClouds.setSource(new ol.source.XYZ({
+                url: `https://tilecache.rainviewer.com/${latestClouds.path}/512/{z}/{x}/{y}/0/0_0.png`,
+                attributions: '<a href="https://www.rainviewer.com/api.html" target="_blank">RainViewer.com</a>',
+                crossOrigin: 'anonymous',
+                maxZoom: 7,
+            }));
+        }
+        return true;
 
     } catch (error) {
         console.error("Error refreshing RainViewer layers:", error);
+        return false;
     }
 }
 
 addOverlayLayer("RainViewer Radar", rainviewerRadar);
 addOverlayLayer("RainViewer Clouds", rainviewerClouds);
 
-rainviewerRadar.on('change:visible', function (evt) {
-    if (evt.target.getVisible()) {
-        refreshRainviewerLayers();
-        window.setInterval(refreshRainviewerLayers, 2 * 60 * 1000);
-    }
-});
+let rainviewerIntervalId = null;
 
-rainviewerClouds.on('change:visible', function (evt) {
-    if (evt.target.getVisible()) {
+function onRainviewerVisibilityChange() {
+    const anyVisible = rainviewerRadar.getVisible() || rainviewerClouds.getVisible();
+    if (anyVisible) {
         refreshRainviewerLayers();
-        window.setInterval(refreshRainviewerLayers, 2 * 60 * 1000);
+        if (rainviewerIntervalId === null) {
+            rainviewerIntervalId = window.setInterval(refreshRainviewerLayers, 2 * 60 * 1000);
+        }
+    } else {
+        if (rainviewerIntervalId !== null) {
+            window.clearInterval(rainviewerIntervalId);
+            rainviewerIntervalId = null;
+        }
     }
-});
+}
+
+rainviewerRadar.on('change:visible', onRainviewerVisibilityChange);
+rainviewerClouds.on('change:visible', onRainviewerVisibilityChange);
 
 function makeDraggable(dragHandle, dragTarget) {
     const moveThreshold = 15;
@@ -8010,132 +7829,131 @@ if (communityFeed) {
     button.classList.remove('fill-red');
     button.classList.add('fill-green');
 
-    var feedVector = new ol.source.Vector({
-        features: []
-    });
+    var feedVector = new ol.source.Vector({ features: [] });
+
+    // Simple style: grey dot for ships, teal for AtoN/base, orange for SAR/heli/plane.
+    // Moving ships with a known direction get a small directional triangle.
+    // type: 0=moving, 1=stationary, 2=AtoN/base, 3=SAR/heli/plane
+    // Derive sprite coordinates from the compact binary flags.
+    // Sprite sheet columns (cx, cy=0 moving / cy=20 stationary, imgSize=20):
+    //   cx=0  → generic ship (first column — no specific type known)
+    //   cx=20 → Class B
+    //   cx=0, cy=40 → AtoN
+    //   cx=20,cy=40 → base station
+    //   cx=0, cy=60, imgSize=25 → SAR / heli / plane
+    function getFeedSprite(ship) {
+        const type = ship.type;      // 0=moving, 1=stationary, 2=AtoN/base, 3=SAR/heli/plane
+        const classB = ship.class_b; // 1 = Class B transponder
+        const dir = ship.direction;  // degrees or null
+
+        switch (type) {
+            case 2: // AtoN / base station
+                return { cx: 0, cy: 40, imgSize: 20, rot: 0 };
+            case 3: // SAR / helicopter / plane
+                return { cx: 0, cy: 60, imgSize: 25, rot: dir != null ? dir * Math.PI / 180 : 0 };
+            default: { // 0 = moving, 1 = stationary
+                const cx = classB ? 20 : 0;
+                const isMoving = type === 0 && dir != null;
+                const cy = isMoving ? 0 : 20;
+                const rot = isMoving ? dir * Math.PI / 180 : 0;
+                return { cx, cy, imgSize: 20, rot };
+            }
+        }
+    }
 
     var feederStyle = function (feature) {
+        const sp = getFeedSprite(feature.ship);
         return new ol.style.Style({
             image: new ol.style.Icon({
-                src: "https://www.aiscatcher.org/hub_test/sprites_hub.png",
-                rotation: feature.ship.rot,
-                offset: [feature.ship.cx, feature.ship.cy],
-                size: [feature.ship.imgSize, feature.ship.imgSize],
+                src: "https://api.aiscatcher.org/community/v1/sprites.png",
+                offset: [sp.cx, sp.cy],
+                size: [sp.imgSize, sp.imgSize],
+                rotation: sp.rot,
                 scale: settings.icon_scale * 0.8,
-                opacity: 1
+                opacity: 0.85
             })
-        })
-    }
+        });
+    };
 
     var feedLayer = new ol.layer.Vector({
         source: feedVector,
         style: feederStyle
     });
 
+    // Decode the compact binary format (big-endian, 12-byte header + 11 bytes/ship)
+    function decodeCompactShips(buffer) {
+        const view = new DataView(buffer);
+        let offset = 0;
 
-    function redrawCommunityFeed(db) {
+        if (view.byteLength < 12) return [];
 
+        // Header: uint64 timestamp (skip) + int32 count
+        offset += 8; // skip timestamp
+        const count = view.getInt32(offset, false); offset += 4;
+
+        const ships = [];
+        for (let i = 0; i < count; i++) {
+            if (offset + 11 > view.byteLength) break;
+
+            const latRaw = view.getInt32(offset, false);  offset += 4;
+            const lonRaw = view.getInt32(offset, false);  offset += 4;
+            const flags  = view.getUint8(offset);         offset += 1;
+            const dirRaw = view.getUint16(offset, false); offset += 2;
+
+            const lat = (latRaw === 0x7FFFFFFF) ? null : latRaw / 600000.0;
+            const lon = (lonRaw === 0x7FFFFFFF) ? null : lonRaw / 600000.0;
+
+            if (lat === null || lon === null) continue;
+
+            ships.push({
+                lat,
+                lon,
+                type:      flags & 0x03,
+                approx:   (flags >> 2) & 1,
+                class_b:  (flags >> 3) & 1,
+                direction: (dirRaw === 0xFFFF) ? null : dirRaw / 10.0
+            });
+        }
+        return ships;
+    }
+
+    function redrawCommunityFeed() {
         feedVector.clear();
-
-        for (let [mmsi, entry] of Object.entries(CshipsDB)) {
-            let ship = entry.raw;
-            if (ship.lat != null && ship.lon != null && ship.lat != 0 && ship.lon != 0 && ship.lat < 90 && ship.lon < 180) {
-                getSprite(ship)
-
-                const lon = ship.lon
-                const lat = ship.lat
-
-                const point = new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-                var feature = new ol.Feature({
-                    geometry: point
-                })
-
-                feature.ship = ship;
-                feature.link = 'https://www.aiscatcher.org/?zoom=12&mmsi=' + ship.mmsi
-                feature.tooltip = ship.shipname || ship.mmsi
-                feedVector.addFeature(feature)
-            }
+        for (const ship of communityShips) {
+            const feature = new ol.Feature({
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([ship.lon, ship.lat]))
+            });
+            feature.ship = ship;
+            feature.link = `https://www.aiscatcher.org/livemap?lat=${ship.lat}&lon=${ship.lon}&zoom=16.00`;
+            feedVector.addFeature(feature);
         }
     }
 
+    let communityShips = [];
 
-    let CshipsDB = {}
-
-    async function fetchCommunityShips(noDoubleFetch = true) {
-
-        let ships = {};
-
+    async function fetchCommunityShips() {
         try {
             const extent = map.getView().calculateExtent(map.getSize());
             const extentInLatLon = ol.proj.transformExtent(extent, 'EPSG:3857', 'EPSG:4326');
 
-            let minLon = extentInLatLon[0] - 0.0045;
-            let minLat = extentInLatLon[1] - 0.0045;
-            let maxLon = extentInLatLon[2] + 0.0045;
-            let maxLat = extentInLatLon[3] + 0.0045;
+            const minLon = extentInLatLon[0] - 0.0045;
+            const minLat = extentInLatLon[1] - 0.0045;
+            const maxLon = extentInLatLon[2] + 0.0045;
+            const maxLat = extentInLatLon[3] + 0.0045;
+            const zoom   = map.getView().getZoom();
 
-            let zoom = map.getView().getZoom();
-
-            response = await fetch("https://www.aiscatcher.org/hub_test/ships_array.json?" + zoom + "," + minLat + "," + minLon + "," + maxLat + "," + maxLon + "," + -1);
+            const url = `https://api.aiscatcher.org/community/v1/ships?${zoom},${minLat},${minLon},${maxLat},${maxLon}`;
+            const response = await fetch(url);
+            const buffer = await response.arrayBuffer();
+            communityShips = decodeCompactShips(buffer);
+            return true;
         } catch (error) {
-            console.log("failed loading ships: " + error);
+            console.log("Failed loading community ships: " + error);
             return false;
         }
-
-        ships = await response.json();
-
-
-        const keys = [
-            "mmsi",
-            "lat",
-            "lon",
-            "distance",
-            "bearing",
-            "level",
-            "count",
-            "ppm",
-            "approx",
-            "heading",
-            "cog",
-            "speed",
-            "to_bow",
-            "to_stern",
-            "to_starboard",
-            "to_port",
-            "last_group",
-            "group_mask",
-            "shiptype",
-            "mmsi_type",
-            "shipclass",
-            "validated",
-            "msg_type",
-            "channels",
-            "country",
-            "status",
-            "draught",
-            "eta_month",
-            "eta_day",
-            "eta_hour",
-            "eta_minute",
-            "imo",
-            "callsign",
-            "shipname",
-            "destination",
-            "last_signal",
-        ];
-
-        CshipsDB = {};
-        ships.values.forEach((v) => {
-            const s = Object.fromEntries(keys.map((k, i) => [k, v[i]]));
-            const entry = {};
-            entry.raw = s;
-            CshipsDB[s.mmsi] = entry;
-        });
-
-        return true;
     }
 
-    debounceUpdateCommunityFeed = debounce(updateCommunityFeed, 250);
+    var debounceUpdateCommunityFeed = debounce(updateCommunityFeed, 250);
 
     feedLayer.on('change:visible', function () {
         if (feedLayer.getVisible()) {
@@ -8146,9 +7964,7 @@ if (communityFeed) {
     function updateCommunityFeed() {
         if (!feedLayer.isVisible()) return;
         fetchCommunityShips().then((ok) => {
-            if (ok) {
-                redrawCommunityFeed(CshipsDB);
-            }
+            if (ok) redrawCommunityFeed();
         });
     }
     addOverlayLayer("Community Feed", feedLayer);
@@ -8161,6 +7977,7 @@ console.log("Plugin loading completed");
 
 console.log("Load settings");
 loadSettings();
+if (typeof server_receivers !== 'undefined') updateReceiverSelect(server_receivers);
 
 console.log("Load settings from URL parameters");
 
@@ -8216,6 +8033,11 @@ if (typeof log_enabled === "undefined" || log_enabled === false) {
 if (typeof decoder_enabled === "undefined" || decoder_enabled === false) {
     document.getElementById("decoder_tab").style.display = "none";
     document.getElementById("decoder_tab_mini").style.display = "none";
+}
+
+if (typeof webcontrol_http === "undefined" || !webcontrol_http) {
+    document.getElementById("webcontrol_tab").style.display = "none";
+    document.getElementById("webcontrol_tab_mini").style.display = "none";
 }
 
 showWelcome();

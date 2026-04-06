@@ -36,8 +36,8 @@ namespace AIS
 	{
 		std::stringstream ss;
 
-		int degrees = static_cast<int>(value);
-		float minutes = (value - degrees) * 60;
+		int degrees = static_cast<int>(std::abs(value));
+		float minutes = (std::abs(value) - degrees) * 60;
 
 		ss << std::setfill('0') << std::setw(isLatitude ? 2 : 3) << std::abs(degrees);
 		ss << std::setfill('0') << std::setw(5) << std::fixed << std::setprecision(2) << minutes;
@@ -99,8 +99,19 @@ namespace AIS
 			else
 				ts << (rxtime / 1000000);
 
-			ss << ",\"rxuxtime\":\"" << ts.str() << "\"";
+			ss << ",\"rxuxtime\":" << ts.str();
 			ss << ",\"rxtime\":\"" << getRxTime() << "\"";
+		}
+
+		if (toa != 0)
+		{
+			std::stringstream ts;
+			if ((toa % 1000000) != 0)
+				ts << std::fixed << std::setprecision(6) << ((double)toa / 1000000.0);
+			else
+				ts << (toa / 1000000);
+
+			ss << ",\"toa\":" << ts.str();
 		}
 
 		if (!uuid.empty())
@@ -158,7 +169,7 @@ namespace AIS
 		for (const auto &nmea : NMEA)
 		{
 			std::stringstream tb;
-			tb << "s:" << src << ",c:" << rxtime;
+			tb << "s:" << src << ",c:" << std::fixed << std::setprecision(6) << ((double)rxtime / 1000000.0);
 
 			if (total > 1)
 				tb << ",g:" << seq << "-" << total << "-" << groupId;

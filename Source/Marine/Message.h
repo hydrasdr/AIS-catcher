@@ -63,6 +63,7 @@ namespace AIS
 
 		uint8_t data[MAX_AIS_BYTES + 1];
 		int64_t rxtime; // microseconds since epoch
+		int64_t toa; // time of arrival in seconds since epoch
 		int length;
 		char channel;
 		long start_idx, end_idx;
@@ -99,6 +100,16 @@ namespace AIS
       		return rxtime;
   		}
 
+		void setTOA(int64_t t)
+		{
+			toa = t;
+		}
+
+		int64_t getTOA() const
+		{
+			return toa;
+		}
+
 		void setRxTimeUnix(std::time_t t)
 		{
 			rxtime = (int64_t)t * 1000000;
@@ -122,6 +133,7 @@ namespace AIS
 		void clear()
 		{
 			length = 0;
+			toa = 0;
 			NMEA.resize(0);
 			std::memset(data, 0, 128);
 		}
@@ -228,7 +240,7 @@ namespace AIS
 
 	class Filter
 	{
-		const uint32_t all = 0xFFFFFFFF;
+		static const uint32_t all = 0xFFFFFFFF;
 		uint32_t allow = all;
 		uint32_t allow_repeat = all;
 		bool on = false;
@@ -255,6 +267,7 @@ namespace AIS
 		bool SetOption(std::string option, std::string arg);
 		std::string Get();
 		bool isOn() { return on; }
+		bool hasIDFilter() const { return !ID_allowed.empty() || !MMSI_allowed.empty(); }
 		std::string getAllowed();
 		bool includeGPS() { return on ? GPS : true; }
 		bool include(const Message &msg);

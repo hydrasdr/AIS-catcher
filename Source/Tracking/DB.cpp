@@ -77,38 +77,6 @@ void DB::getDistanceAndBearing(float lat1, float lon1, float lat2, float lon2, f
 	bearing = rad2deg(atan2(y, x));
 }
 
-void DB::getBinary(std::vector<char> &v)
-{
-	std::lock_guard<std::mutex> lock(mtx);
-
-	Util::Serialize::Uint64(time(nullptr), v);
-	Util::Serialize::Int32(count, v);
-
-	if (latlon_share && isValidCoord(lat, lon))
-	{
-		Util::Serialize::Int8(1, v);
-		Util::Serialize::LatLon(lat, lon, v);
-		Util::Serialize::Uint32(own_mmsi, v);
-	}
-	else
-	{
-		Util::Serialize::Int8(0, v);
-	}
-
-	int ptr = first;
-
-	delim = "";
-	while (ptr != -1)
-	{
-		const Ship &ship = ships[ptr];
-		if (ship.mmsi != 0)
-		{
-			ship.Serialize(v);
-		}
-		ptr = ships[ptr].next;
-	}
-}
-
 // add member to get JSON in form of array with values and keys separately
 std::string DB::getJSONcompact(bool full)
 {
@@ -278,7 +246,7 @@ void DB::getShipJSON(const Ship &ship, std::string &content, long int delta_time
 	content += "\"country\":\"" + std::string(ship.country_code) + "\",";
 	content += "\"status\":" + std::to_string(ship.status) + ",";
 
-	content += "\"draught\":" + ((ship.to_port == DRAUGHT_UNDEFINED) ? null_str : std::to_string(ship.draught)) + ",";
+	content += "\"draught\":" + ((ship.draught == DRAUGHT_UNDEFINED) ? null_str : std::to_string(ship.draught)) + ",";
 
 	content += "\"eta_month\":" + ((ship.month == ETA_MONTH_UNDEFINED) ? null_str : std::to_string(ship.month)) + ",";
 	content += "\"eta_day\":" + ((ship.day == ETA_DAY_UNDEFINED) ? null_str : std::to_string(ship.day)) + ",";
@@ -423,10 +391,10 @@ std::string DB::getAllPathJSON()
 		if (ship.mmsi != 0)
 		{
 			long int delta_time = (long int)tm - (long int)ship.last_signal;
-			if (delta_time > TIME_HISTORY)
+			if (delta_time > 5 * 60 * 60)
 				break;
 
-			content += delim + "\"" + std::to_string(ship.mmsi) + "\":" + getSinglePathJSON(ptr);
+			content += delim + "\"" + std::to_string(ship.mmsi) + "\":" + getSinglePathJSONCompact(ptr);
 			delim = ",";
 		}
 		ptr = ships[ptr].next;
@@ -467,6 +435,104 @@ std::string DB::getSinglePathJSON(int idx)
 	if (content != "[")
 		content.pop_back();
 	content += "]";
+	return content;
+}
+
+std::string DB::getSinglePathJSONCompact(int idx)
+{
+	uint32_t mmsi = ships[idx].mmsi;
+	int ptr = ships[idx].path_ptr;
+	int t = ships[idx].count + 1;
+	int count = 0;
+
+	std::string result = "[";
+
+	while (isNextPathPoint(ptr, mmsi, t))
+	{
+		if (count >= 250)
+			break;
+
+		if (isValidCoord(paths[ptr].lat, paths[ptr].lon))
+		{
+			result += "[";
+			result += std::to_string(paths[ptr].lat);
+			result += ",";
+			result += std::to_string(paths[ptr].lon);
+			result += ",";
+			result += std::to_string(paths[ptr].timestamp_start);
+			result += ",";
+			result += std::to_string(paths[ptr].timestamp_end);
+			result += "],";
+			count++;
+		}
+		t = paths[ptr].count;
+		ptr = paths[ptr].next;
+	}
+	if (result != "[")
+		result.pop_back();
+	result += "]";
+	return result;
+}
+
+std::string DB::getSinglePathJSONCompactSince(int idx, std::time_t, std::time_t since)
+{
+	uint32_t mmsi = ships[idx].mmsi;
+	int ptr = ships[idx].path_ptr;
+	int t = ships[idx].count + 1;
+
+	std::string result = "[";
+
+	while (isNextPathPoint(ptr, mmsi, t))
+	{
+		if ((long int)paths[ptr].timestamp_end < (long int)since)
+			break;
+
+		if (isValidCoord(paths[ptr].lat, paths[ptr].lon))
+		{
+			result += "[";
+			result += std::to_string(paths[ptr].lat);
+			result += ",";
+			result += std::to_string(paths[ptr].lon);
+			result += ",";
+			result += std::to_string(paths[ptr].timestamp_start);
+			result += ",";
+			result += std::to_string(paths[ptr].timestamp_end);
+			result += "],";
+		}
+		t = paths[ptr].count;
+		ptr = paths[ptr].next;
+	}
+	if (result != "[")
+		result.pop_back();
+	result += "]";
+	return result;
+}
+
+std::string DB::getAllPathJSONSince(std::time_t since)
+{
+	std::lock_guard<std::mutex> lock(mtx);
+
+	std::string content = "{";
+
+	std::time_t tm = time(nullptr);
+	int ptr = first;
+
+	delim = "";
+	while (ptr != -1)
+	{
+		const Ship &ship = ships[ptr];
+		if (ship.mmsi != 0)
+		{
+			std::string seg = getSinglePathJSONCompactSince(ptr, tm, since);
+			if (seg != "[]")
+			{
+				content += delim + "\"" + std::to_string(ship.mmsi) + "\":" + seg;
+				delim = ",";
+			}
+		}
+		ptr = ships[ptr].next;
+	}
+	content += "}\n\n";
 	return content;
 }
 
@@ -520,7 +586,7 @@ std::string DB::getPathJSON(uint32_t mmsi)
 	int idx = findShip(mmsi);
 	if (idx == -1)
 		return "[]";
-	return getSinglePathJSON(idx);
+	return getSinglePathJSONCompact(idx);
 }
 
 std::string DB::getPathGeoJSON(uint32_t mmsi)
@@ -779,10 +845,10 @@ bool DB::updateFields(const JSON::Property &p, const AIS::Message *msg, Ship &v,
 	case AIS::KEY_MANEUVER:
 		v.setManeuver(p.Get().getInt()); // 0=not available, 1=no special, 2=special (direct value)
 		break;
-	#pragma GCC diagnostic push
-	#if defined(__GNUC__) && !defined(__clang__)
-	#pragma GCC diagnostic ignored "-Wstringop-truncation"
-	#endif
+#pragma GCC diagnostic push
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
+#endif
 	case AIS::KEY_NAME:
 	case AIS::KEY_SHIPNAME:
 		std::strncpy(v.shipname, p.Get().getString().c_str(), sizeof(v.shipname) - 1);
@@ -800,7 +866,7 @@ bool DB::updateFields(const JSON::Property &p, const AIS::Message *msg, Ship &v,
 		std::strncpy(v.destination, p.Get().getString().c_str(), sizeof(v.destination) - 1);
 		v.destination[sizeof(v.destination) - 1] = '\0';
 		break;
-	#pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 	}
 	return position_updated;
 }
@@ -812,10 +878,14 @@ bool DB::updateShip(const JSON::JSON &data, TAG &tag, Ship &ship)
 	// determine whether we accept msg 27 to update lat/lon
 	bool allowApproxLatLon = false, positionUpdated = false;
 
-	if (msg->type() == 27)
+	int type = msg->type();
+	int repeat = msg->repeat();
+
+	if (type == 27)
 	{
 		int timeout = 10 * 60;
-
+		repeat = 0;
+		
 		if (ship.speed != SPEED_UNDEFINED && ship.speed != 0)
 			timeout = MAX(10, MIN(timeout, (int)(0.25f / ship.speed * 3600.0f)));
 
@@ -830,7 +900,7 @@ bool DB::updateShip(const JSON::JSON &data, TAG &tag, Ship &ship)
 
 	ship.last_signal = msg->getRxTimeUnix();
 
-	if (msg->repeat() == 0)
+	if (repeat == 0)
 	{
 		ship.last_direct_signal = ship.last_signal;
 		ship.setRepeat(0);
@@ -845,7 +915,7 @@ bool DB::updateShip(const JSON::JSON &data, TAG &tag, Ship &ship)
 
 	ship.ppm = tag.ppm;
 	ship.level = tag.level;
-	ship.msg_type |= 1 << msg->type();
+	ship.msg_type |= 1 << type;
 
 	if (msg->getChannel() >= 'A' && msg->getChannel() <= 'D')
 		ship.orOpChannels(1 << (msg->getChannel() - 'A'));
@@ -857,7 +927,7 @@ bool DB::updateShip(const JSON::JSON &data, TAG &tag, Ship &ship)
 
 	if (positionUpdated)
 	{
-		ship.setApproximate(msg->type() == 27);
+		ship.setApproximate(type == 27);
 
 		if (ship.mmsi == own_mmsi)
 		{
@@ -922,12 +992,6 @@ void DB::processBinaryMessage(const JSON::JSON &data, Ship &ship, bool &position
 			binmsg.lon = loc_lon;
 
 			// switch off approximation of mmsi location
-			if (false && !isValidCoord(ship.lat, ship.lon))
-			{
-				position_updated = true;
-				ship.lat = loc_lat;
-				ship.lon = loc_lon;
-			}
 		}
 		binmsg.timestamp = msg->getRxTimeUnix();
 		binaryMsgIndex = (binaryMsgIndex + 1) % MAX_BINARY_MESSAGES;

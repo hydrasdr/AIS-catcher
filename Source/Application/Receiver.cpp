@@ -118,7 +118,7 @@ void Receiver::setupDevice()
 	tag.station_lon = station_lon;
 
 	if (!deviceManager.openDevice(sample_rate, bandwidth, ppm, frequency, tag))
-		throw std::runtime_error("cannot set up device");
+		throw std::runtime_error("Receiver: cannot set up device.");
 }
 
 // Set up model
@@ -219,11 +219,12 @@ void Receiver::setupModel(int &group, int idx)
 	jsonais.resize(models.size());
 
 	// assign the output of each individual model to a seperate group
-	assert(group + models.size() < 32);
+	if (group + (int)models.size() >= 32)
+		throw std::runtime_error("Receiver: too many models/receivers, group bit limit exceeded.");
 
 	for (int i = 0; i < models.size(); i++)
 	{
-		uint32_t mask = 1 << group;
+		uint32_t mask = 1u << group;
 		jsonais[i].out.setGroupOut(mask);
 		models[i]->Output().out.setGroupOut(mask);
 		models[i]->OutputADSB().out.setGroupOut(mask);
@@ -252,7 +253,7 @@ void Receiver::play()
 		Info() << "Settings  : " << device->Get();
 		for (int i = 0; i < models.size(); i++)
 			Info() << "Model #" + std::to_string(receiver_index) + "-" + std::to_string(i) << " -> (Src: " << std::to_string(Util::Helper::lsb(models[i]->Output().out.getGroupOut()) + 1)
-				   << ", Grp: " + std::to_string(models[i]->Output().out.getGroupOut()) + "): [" + models[i]->getName() + "] " + models[i]->Get();
+				   << ", Grp: " + std::to_string(models[i]->Output().out.getGroupOut()) + "): [" + models[i]->getName() + "] channel " + ChannelNMEA + " " + models[i]->Get();
 	}
 }
 

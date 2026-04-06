@@ -21,26 +21,27 @@ namespace AIS
 {
 
 	const std::vector<std::vector<std::string>> KeyMap = {
-		{"class", "class", "class", "", "", ""},										// KEY_CLASS
-		{"device", "device", "device", "", "", ""},										// KEY_DEVICE
-		{"driver", "driver", "driver", "", "", ""},										// KEY_DRIVER
-		{"error", "error", "error", "", "", ""},										// KEY_ERROR
-		{"scaled", "", "scaled", "", "", ""},											// KEY_SCALED
-		{"channel", "channel", "channel", "", "", ""},									// KEY_CHANNEL
-		{"hardware", "hardware", "hardware", "", "", ""},								// KEY_HARDWARE
-		{"ipv4", "ipv4", "ipv4", "", "", ""},											// KEY_IPV4
-		{"signalpower", "signalpower", "signalpower", "", "", ""},						// KEY_SIGNAL_POWER
-		{"ppm", "ppm", "ppm", "", "", ""},												// KEY_PPM
-		{"rxtime", "rxtime", "rxtime", "rxtime", "", ""},								// KEY_RXTIME
-		{"rxuxtime", "rxuxtime", "rxuxtime", "rxuxtime", "", ""},						// KEY_RXUXTIME
-		{"nmea", "nmea", "nmea", "", "", ""},											// KEY_NMEA
-		{"eta", "", "eta", "", "", ""},													// KEY_ETA
-		{"shiptype_text", "", "shiptype_text", "", "", ""},								// KEY_SHIPTYPE_TEXT
-		{"aid_type_text", "", "aid_type_text", "", "", ""},								// KEY_AID_TYPE_TEXT
-		{"ssc", "", "ssc", "", "", ""},													// KEY_SAMPLE_START_COUNT
-		{"sl", "", "sl", "", "", ""},													// KEY_SAMPLE_LENGTH
-		{"station_id", "", "station_id", "", "", ""},									// KEY_STATION_ID
-		{"version", "", "version", "", "", ""},											// KEY_VERSION
+		{"class", "class", "class", "", "", ""},				   // KEY_CLASS
+		{"device", "device", "device", "", "", ""},				   // KEY_DEVICE
+		{"driver", "driver", "driver", "", "", ""},				   // KEY_DRIVER
+		{"error", "error", "error", "", "", ""},				   // KEY_ERROR
+		{"scaled", "", "scaled", "", "", ""},					   // KEY_SCALED
+		{"channel", "channel", "channel", "", "", ""},			   // KEY_CHANNEL
+		{"hardware", "hardware", "hardware", "", "", ""},		   // KEY_HARDWARE
+		{"ipv4", "ipv4", "ipv4", "", "", ""},					   // KEY_IPV4
+		{"signalpower", "signalpower", "signalpower", "", "", ""}, // KEY_SIGNAL_POWER
+		{"ppm", "ppm", "ppm", "", "", ""},						   // KEY_PPM
+		{"rxtime", "rxtime", "rxtime", "rxtime", "", ""},		   // KEY_RXTIME
+		{"rxuxtime", "rxuxtime", "rxuxtime", "rxuxtime", "", ""},  // KEY_RXUXTIME
+		{"nmea", "nmea", "nmea", "", "", ""},					   // KEY_NMEA
+		{"eta", "", "eta", "", "", ""},							   // KEY_ETA
+		{"shiptype_text", "", "shiptype_text", "", "", ""},		   // KEY_SHIPTYPE_TEXT
+		{"aid_type_text", "", "aid_type_text", "", "", ""},		   // KEY_AID_TYPE_TEXT
+		{"ssc", "", "ssc", "", "", ""},							   // KEY_SAMPLE_START_COUNT
+		{"sl", "", "sl", "", "", ""},							   // KEY_SAMPLE_LENGTH
+		{"station_id", "", "station_id", "", "", ""},			   // KEY_STATION_ID
+		{"version", "", "version", "", "", ""},					   // KEY_VERSION
+		{"toa", "", "toa", "", "", ""},							   // KEY_TOA
 		{"", "", "", "", "about", ""},													// KEY_SETTING_ABOUT
 		{"", "", "", "", "address", ""},												// KEY_SETTING_ADDRESS
 		{"", "", "", "", "active", ""},													// KEY_SETTING_ACTIVE
@@ -154,6 +155,7 @@ namespace AIS
 		{"", "", "", "", "share_loc", ""},												// KEY_SETTING_SHARE_LOC
 		{"", "", "", "", "sharing", ""},												// KEY_SETTING_SHARING
 		{"", "", "", "", "sharing_key", ""},											// KEY_SETTING_SHARING_KEY
+		{"", "", "", "", "sharing_zone", ""},											// KEY_SETTING_SHARING_ZONE
 		{"", "", "", "", "soapysdr", ""},												// KEY_SETTING_SOAPYSDR
 		{"", "", "", "", "soxr", ""},													// KEY_SETTING_SOXR
 		{"", "", "", "", "spyserver", ""},												// KEY_SETTING_SPYSERVER
@@ -166,6 +168,7 @@ namespace AIS
 		{"", "", "", "", "tcp_listener", ""},											// KEY_SETTING_TCP_LISTENER
 		{"", "", "", "", "test", ""},													// KEY_SETTING_TEST
 		{"", "", "", "", "timeout", ""},												// KEY_SETTING_TIMEOUT
+		{"", "", "", "", "timeout_only_when_idle", ""},									// KEY_SETTING_TIMEOUT_NOMSG
 		{"", "", "", "", "threshold", ""},												// KEY_SETTING_THRESHOLD
 		{"", "", "", "", "topic", ""},													// KEY_SETTING_TOPIC
 		{"", "", "", "", "tuner", ""},													// KEY_SETTING_TUNER
@@ -180,9 +183,11 @@ namespace AIS
 		{"", "", "", "", "version", ""},												// KEY_SETTING_VERSION
 		{"", "", "", "", "vga", ""},													// KEY_SETTING_VGA
 		{"", "", "", "", "wavfile", ""},												// KEY_SETTING_WAVFILE
+		{"", "", "", "", "webcontrol_http", ""},										// KEY_SETTING_WEBCONTROL_HTTP
 		{"", "", "", "", "qos", ""},													// KEY_SETTING_QOS
 		{"", "", "", "", "zlib", ""},													// KEY_SETTING_ZLIB
 		{"", "", "", "", "zmq", ""},													// KEY_SETTING_ZMQ
+		{"", "", "", "", "zone", ""},													// KEY_SETTING_ZONE
 		{"accuracy", "", "accuracy", "", "", ""},										// KEY_ACCURACY
 		{"ack_required", "", "ack_required", "", "", ""},								// KEY_ACK_REQUIRED
 		{"addressed", "", "", "", "", ""},												// KEY_ADDRESSED
@@ -734,6 +739,7 @@ namespace AIS
 		KeyInfo("", "", nullptr),																							// KEY_SAMPLE_LENGTH
 		KeyInfo("", "", nullptr),																							// KEY_STATION_ID
 		KeyInfo("", "", nullptr),																							// KEY_VERSION
+		KeyInfo("", "", nullptr),																							// KEY_TOA
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ABOUT
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ADDRESS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ACTIVE
@@ -764,6 +770,8 @@ namespace AIS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_DESCRIPTION
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_DEVICE
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_DROOP
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_DUMP
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_DUMP_FILE
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ENDPOINT
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_FILE
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_FILTER
@@ -845,6 +853,7 @@ namespace AIS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SHARE_LOC
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SHARING
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SHARING_KEY
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_SHARING_ZONE		
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SOAPYSDR
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SOXR
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_SPYSERVER
@@ -857,6 +866,7 @@ namespace AIS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_TCP_LISTENER
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_TEST
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_TIMEOUT
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_TIMEOUT_NOMSG
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_THRESHOLD
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_TOPIC
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_TUNER
@@ -871,9 +881,11 @@ namespace AIS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_VERSION
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_VGA
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_WAVFILE
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_WEBCONTROL_HTTP
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_QOS
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ZLIB
 		KeyInfo("", "", nullptr),																							// KEY_SETTING_ZMQ
+		KeyInfo("", "", nullptr),																							// KEY_SETTING_ZONE
 		KeyInfo("", "Position Accuracy; 1 indicates DGPS-quality (< 10m), 0 indicates unaugmented GNSS (> 10m).", nullptr), // KEY_ACCURACY
 		KeyInfo("", "", nullptr),																							// KEY_ACK_REQUIRED
 		KeyInfo("", "", nullptr),																							// KEY_ADDRESSED

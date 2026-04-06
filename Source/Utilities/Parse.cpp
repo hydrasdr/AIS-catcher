@@ -135,7 +135,7 @@ namespace Util
 	void Parse::HTTP_URL(const std::string &url, std::string &protocol, std::string &host, std::string &port, std::string &path)
 	{
 
-		int idx = url.find("://");
+		std::string::size_type idx = url.find("://");
 		if (idx != std::string::npos)
 		{
 
@@ -143,7 +143,7 @@ namespace Util
 			path = "/";
 
 			idx += 3;
-			int hostEnd = url.find(':', idx);
+			std::string::size_type hostEnd = url.find(':', idx);
 			if (hostEnd == std::string::npos)
 			{
 				hostEnd = url.find('/', idx);
@@ -157,14 +157,14 @@ namespace Util
 			{
 				host = url.substr(idx, hostEnd - idx);
 
-				int portStart = url.find(':', hostEnd);
+				std::string::size_type portStart = url.find(':', hostEnd);
 				if (portStart != std::string::npos)
 				{
-					int portEnd = url.find('/', portStart);
+					std::string::size_type portEnd = url.find('/', portStart);
 					port = url.substr(portStart + 1, (portEnd != std::string::npos ? portEnd : url.length()) - portStart - 1);
 				}
 
-				int pathStart = url.find('/', hostEnd);
+				std::string::size_type pathStart = url.find('/', hostEnd);
 				if (pathStart != std::string::npos)
 				{
 					path = url.substr(pathStart);
@@ -459,5 +459,21 @@ namespace Util
 
 		val = (unsigned)Integer(arg, min, max);
 		return true;
+	}
+
+	void Parse::Split(const std::string &s, char delim, std::vector<std::string> &out)
+	{
+		out.clear();
+		std::stringstream ss(s);
+		std::string tok;
+		while (std::getline(ss, tok, delim))
+		{
+			tok.erase(0, tok.find_first_not_of(" \t"));
+			auto last = tok.find_last_not_of(" \t");
+			if (last != std::string::npos)
+				tok.erase(last + 1);
+			if (!tok.empty())
+				out.push_back(tok);
+		}
 	}
 }

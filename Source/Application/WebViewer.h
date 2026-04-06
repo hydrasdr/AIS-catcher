@@ -19,8 +19,12 @@
 #include <iostream>
 #include <string.h>
 #include <thread>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <vector>
+#include <memory>
+#include <fstream>
 
 #include "AIS-catcher.h"
 
@@ -88,15 +92,155 @@ public:
 	}
 };
 
+// Tracking/DB config accumulated during Set(), applied to all ReceiverTrackers in connect().
+struct TrackingConfig
+{
+	float lat = LAT_UNDEFINED, lon = LON_UNDEFINED;
+	bool latlon_share = false;
+	bool server_mode = false;
+	bool msg_save = false;
+	bool use_GPS = true;
+	uint32_t own_mmsi = 0;
+	int time_history = 30 * 60;
+	int cutoff = 0;
+};
+
+// Bundles all per-receiver (or aggregate) state: ship DB, counters, history.
+// states[0] is always "All" (aggregate). states[1..N] are per-receiver when N > 1.
+struct ReceiverTracker
+{
+private:
+	DB ships;
+	Counter counter, counter_session;
+	History<60, 1> hist_second;
+	History<60, 60> hist_minute;
+	History<24, 3600> hist_hour;
+	History<90, 86400> hist_day;
+
+public:
+	std::string label;
+	std::string product, vendor, serial, model_name, sample_rate;
+
+	// Device metadata
+	void setDevice(Device::Device *device);
+	void appendDevice(Device::Device *device, const std::string &newline);
+
+	// Config
+	void applyConfig(const TrackingConfig &cfg, const AIS::Filter &f);
+
+	// Lifecycle
+	void setup();
+	void clear();
+	void reset();
+	bool save(std::ofstream &f);
+	bool load(std::ifstream &f);
+
+	// Wire internal streams (ships → hist_* → counters)
+	void wireStreams();
+
+	// Connect incoming data sources (ships as sink)
+	void connectJSON(Connection<JSON::JSON> &c) { c.Connect((StreamIn<JSON::JSON> *)&ships); }
+	void connectGPS(Connection<AIS::GPS> &c) { c.Connect((StreamIn<AIS::GPS> *)&ships); }
+
+	// Connect outgoing sinks (ships as source)
+	template <typename T>
+	void connectSink(T &sink) { ships >> sink; }
+
+	// JSON output
+	std::string toHistoryJSON();
+	std::string toCountersJSON();
+
+	// Ship data queries
+	int getCount() { return ships.getCount(); }
+	int getMaxCount() { return ships.getMaxCount(); }
+	float getMsgRate() { return hist_second.getAverage(); }
+
+	std::string getShipsJSON(bool full = false) { return ships.getJSON(full); }
+	std::string getShipsJSONcompact() { return ships.getJSONcompact(); }
+	std::string getBinaryMessagesJSON() { return ships.getBinaryMessagesJSON(); }
+	std::string getKML() { return ships.getKML(); }
+	std::string getGeoJSON() { return ships.getGeoJSON(); }
+	std::string getAllPathJSON() { return ships.getAllPathJSON(); }
+	std::string getAllPathJSONSince(std::time_t since) { return ships.getAllPathJSONSince(since); }
+	std::string getAllPathGeoJSON() { return ships.getAllPathGeoJSON(); }
+	std::string getPathJSON(uint32_t mmsi) { return ships.getPathJSON(mmsi); }
+	std::string getPathGeoJSON(uint32_t mmsi) { return ships.getPathGeoJSON(mmsi); }
+	std::string getMessage(uint32_t mmsi) { return ships.getMessage(mmsi); }
+	std::string getShipJSON(uint32_t mmsi) { return ships.getShipJSON(mmsi); }
+};
+
+// Manages JS/CSS plugin content and frontend configuration variables.
+class PluginManager
+{
+	std::string params;
+	std::string plugin_code;
+	std::string plugin_preamble;
+	std::string stylesheets;
+	std::string about = "This content can be set by the station owner";
+	bool aboutPresent = false;
+
+public:
+	PluginManager();
+
+	void setContext(const std::string &ctx);
+	void setWebControl(const std::string &url);
+	void setShareLoc(bool b);
+	void setMsgSave(bool b);
+	void setRealtime(bool b);
+	void setLog(bool b);
+	void setDecoder(bool b);
+	void setReceivers(const std::vector<std::unique_ptr<ReceiverTracker>> &states);
+	void addPlugin(const std::string &path);
+	void addPluginCode(const std::string &code);
+	void addStyle(const std::string &path);
+	void addPluginDir(const std::string &dir);
+	void setAbout(const std::string &path);
+
+	bool isAboutPresent() const { return aboutPresent; }
+	const std::string &getAbout() const { return about; }
+	const std::string &getStylesheets() const { return stylesheets; }
+
+	std::string render(bool communityFeed) const;
+};
+
+class BackupManager
+{
+	std::thread thread;
+	std::mutex mtx;
+	std::condition_variable cv;
+	std::atomic<bool> running{false};
+	int interval = -1;
+	std::string filename;
+	ReceiverTracker *tracker = nullptr;
+
+	void run();
+
+public:
+	void setInterval(int minutes) { interval = minutes; }
+	void setFilename(const std::string &f) { filename = f; }
+	const std::string &getFilename() const { return filename; }
+	void setTracker(ReceiverTracker *t) { tracker = t; }
+
+	void start();
+	void stop();
+	bool save();
+	bool load();
+
+	~BackupManager() { stop(); }
+};
+
 class WebViewer : public IO::HTTPServer, public Setting
 {
 	uint64_t groups_in = 0xFFFFFFFFFFFFFFFF;
 
-	int port = 0;
+public:
+	std::vector<std::string> zones;
+
+private:
+
 	int firstport = 0;
 	int lastport = 0;
 	bool run = false;
-	int backup_interval = -1;
 	bool port_set = false;
 	bool use_zlib = true;
 	bool realtime = false;
@@ -105,51 +249,30 @@ class WebViewer : public IO::HTTPServer, public Setting
 	bool KML = false;
 	bool GeoJSON = false;
 	bool supportPrometheus = false;
-	bool thread_running = false;
-	bool aboutPresent = false;
 
-	std::vector<char> binary;
 	std::vector<std::shared_ptr<MapTiles>> mapSources;
 
-	std::string params;
-	std::string plugin_code;
-	std::string plugins;
-	std::string stylesheets;
-	std::string cdn;
-	std::string about = "This content can be set by the station owner";
+	PluginManager pluginManager;
+	TrackingConfig tracking;
 
-	DB ships;
+	// All receiver states. Index 0 = aggregate "All", index 1..N = per-receiver (only when N > 1).
+	std::vector<std::unique_ptr<ReceiverTracker>> states;
+
 	PlaneDB planes;
 
-	// history of 180 minutes and 180 seconds
-	History<60, 60> hist_minute;
-	History<60, 1> hist_second;
-	History<24, 3600> hist_hour;
-	History<90, 86400> hist_day;
-
-	Counter counter, counter_session;
 	SSEStreamer sse_streamer;
 	WebViewerLogger logger;
-	PromotheusCounter dataPrometheus;
+	PrometheusCounter dataPrometheus;
 	ByteCounter raw_counter;
 
 	std::time_t time_start;
-	std::string sample_rate, product, vendor, model, serial, station = "\"\"", station_link = "\"\"";
-	std::string backup_filename = "";
+	std::string station = "\"\"", station_link = "\"\"";
 	std::string os, hardware;
 
-	std::mutex m;
-	std::condition_variable cv;
-	std::thread backup_thread;
+	BackupManager backup;
 
-	void BackupService();
-	void addPlugin(const std::string &str);
-
-	bool Load();
-	bool Save();
 	void Clear();
 
-	void stopThread();
 	AIS::Filter filter;
 
 	std::vector<std::string> parsePath(const std::string &url);
@@ -157,10 +280,34 @@ class WebViewer : public IO::HTTPServer, public Setting
 	void addMBTilesSource(const std::string &filepath, bool overlay);
 	void addFileSystemTilesSource(const std::string &directoryPath, bool overlay);
 
+	// Route table
+	typedef std::string (*RouteHandler)(WebViewer *, ReceiverTracker *, const std::string &);
+
+	struct Route {
+		const char *path;
+		bool WebViewer::*flag;
+		const char *content_type;
+		RouteHandler handler;
+	};
+
+	static const Route routes[];
+	static int parseMMSI(const std::string &query);
+
+	// JSON builders for complex endpoints
+	std::string buildStatJSON(ReceiverTracker *s);
+	std::string buildMultiPathJSON(ReceiverTracker *s, const std::string &query);
+
 	// NMEA decoder utility
 	static std::string decodeNMEAtoJSON(const std::string &nmea_input, bool enhanced = true);
 
 	const std::vector<std::unique_ptr<IO::OutputMessage>> *msg_channels = nullptr;
+
+	// Parse ?receiver=N from query string; returns 0 on missing/invalid.
+	int parseReceiver(const std::string &query);
+	// Parse ?since=T from query string; returns 0 on missing/invalid.
+	std::time_t parseSinceParam(const std::string &query);
+	// Return state at idx, clamped to states[0] on out-of-range.
+	ReceiverTracker *getState(int idx);
 
 public:
 	WebViewer();
@@ -169,25 +316,16 @@ public:
 	{
 		if (showlog)
 			logger.Stop();
-
-		stopThread();
 	}
 
 	bool &active() { return run; }
-	void connect(Receiver &r);
+	void connect(const std::vector<std::unique_ptr<Receiver>> &receivers);
 	void connect(AIS::Model &model, Connection<JSON::JSON> &json, Device::Device &device);
 	void start();
 	void close();
 	void Reset();
 
-	void setDeviceDescription(std::string p, std::string v, std::string s)
-	{
-		product = p;
-		vendor = v;
-		serial = s;
-	}
-
-	void setOutputChannels(const std::vector<std::unique_ptr<IO::OutputMessage>> &msg)//, const std::vector<std::unique_ptr<IO::OutputJSON>> &json)
+	void setOutputChannels(const std::vector<std::unique_ptr<IO::OutputMessage>> &msg)
 	{
 		msg_channels = &msg;
 	}

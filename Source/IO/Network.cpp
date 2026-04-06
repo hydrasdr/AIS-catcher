@@ -246,11 +246,6 @@ namespace IO
 		{
 			lat = std::to_string(Util::Parse::Float(arg));
 		}
-		else if (option == "GROUPS_IN")
-		{
-			StreamIn<JSON::JSON>::setGroupsIn(Util::Parse::Integer(arg));
-			StreamIn<AIS::GPS>::setGroupsIn(Util::Parse::Integer(arg));
-		}
 		else if (option == "LON")
 		{
 			lon = std::to_string(Util::Parse::Float(arg));
@@ -448,6 +443,7 @@ namespace IO
 		std::string filter_str = filter.Get();
 		if (!filter_str.empty())
 			ss << ", " << filter_str;
+		ss << ", " << getSourcesStr();
 
 		Info() << ss.str();
 
@@ -482,8 +478,10 @@ namespace IO
 
 #ifndef _WIN32
 		int r = fcntl(sock, F_GETFL, 0);
-		r = fcntl(sock, F_SETFL, r | O_NONBLOCK);
+		if (r < 0)
+			throw std::runtime_error("cannot get UDP socket flags for " + host + " port " + port);
 
+		r = fcntl(sock, F_SETFL, r | O_NONBLOCK);
 		if (r < 0)
 			throw std::runtime_error("cannot make UDP socket non-blocking for " + host + " port " + port);
 #else
@@ -537,11 +535,6 @@ namespace IO
 		else if (option == "BROADCAST")
 		{
 			broadcast = Util::Parse::Switch(arg);
-		}
-		else if (option == "GROUPS_IN")
-		{
-			StreamIn<AIS::Message>::setGroupsIn(Util::Parse::Integer(arg));
-			StreamIn<AIS::GPS>::setGroupsIn(Util::Parse::Integer(arg));
 		}
 		else if (option == "RESET")
 		{
@@ -716,6 +709,7 @@ namespace IO
 		std::string filter_str = filter.Get();
 		if (!filter_str.empty())
 			ss << ", " << filter_str;
+		ss << ", " << getSourcesStr();
 		ss << ", status: ";
 
 		// Set up TCP connection
@@ -761,11 +755,6 @@ namespace IO
 		else if (option == "PORT")
 		{
 			port = arg;
-		}
-		else if (option == "GROUPS_IN")
-		{
-			StreamIn<AIS::Message>::setGroupsIn(Util::Parse::Integer(arg));
-			StreamIn<AIS::GPS>::setGroupsIn(Util::Parse::Integer(arg));
 		}
 		else if (option == "KEEP_ALIVE")
 		{
@@ -823,11 +812,6 @@ namespace IO
 		else if (option == "TIMEOUT")
 		{
 			timeout = Util::Parse::Integer(arg);
-		}
-		else if (option == "GROUPS_IN")
-		{
-			StreamIn<AIS::Message>::setGroupsIn(Util::Parse::Integer(arg));
-			StreamIn<AIS::GPS>::setGroupsIn(Util::Parse::Integer(arg));
 		}
 		else if (option == "INCLUDE_SAMPLE_START")
 		{
