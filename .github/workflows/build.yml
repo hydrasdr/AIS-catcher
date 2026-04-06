@@ -376,8 +376,8 @@ jobs:
         cmake .. -A $msplatform -G $gen -DLIBUSB_LIBRARIES="$libusb_lib" -DLIBUSB_INCLUDE_DIR="$libusb_inc" -DTHREADS_PTHREADS_WIN32_LIBRARY="$pthread_lib" -DTHREADS_PTHREADS_INCLUDE_DIR="$pthread_inc"
         cmake --build . --config $config
         cd ..; cd ..
-        cp hydrasdr-host\build\libhydrasdr\src\$config\*.dll release
-        cp hydrasdr-host\build\libhydrasdr\src\$config\*.lib lib
+        cp hydrasdr-host\build\hydrasdr-tools\src\$config\hydrasdr.dll release
+        cp hydrasdr-host\build\libhydrasdr\src\$config\hydrasdr.lib lib
         cp hydrasdr-host\libhydrasdr\src\*.h include
         cp hydrasdr-host\libhydrasdr\LICENSE.md output\Licenses\HYDRASDR
 
@@ -405,44 +405,45 @@ jobs:
         bash -c "gh release upload 'Edge' './output/AIS-catcher ${{matrix.platform}}.zip' --repo ${{ github.repository }} --clobber"
         del "output\AIS-catcher ${{matrix.platform}}.zip"
 
-    - name: Download SDRPlay API
-      run: |
-        cd "C:/Program Files/"
-        Invoke-WebRequest -Uri " https://www.sdrplay.com/software/SDRplay_RSP_API-Windows-3.09.exe" -OutFile sdrplay.exe        
-        choco install innoextract 
-        innoextract sdrplay.exe
-        ren app SDRplay
-
-    - name: Building with SDRPlay support
-      run: |
-        cp "C:\Program Files\SDRplay\API\docs\SDRplay_RSP_API_Release_Notes_V3.09.pdf" output\Licenses\SDRPLAY.pdf
-
-        echo "x64" > x64-a; echo "Win32" > x86-a; $msplatform = $(cat "${{matrix.platform}}-a")
-        $gen = "Visual Studio 17 2022"
-        $config = "Release"
-
-        echo "AIS-catcher"
-
-        Remove-Item build -Recurse
-        mkdir build; cd build
-        cmake .. -A $msplatform -G $gen -DPOTHOSSDR_INCLUDE_DIR=${{github.workspace}}\include -DPOTHOSSDR_LIBRARY_DIR=${{github.workspace}}\lib -DPOTHOSSDR_BINARY_DIR=${{github.workspace}}\release -DRUN_NUMBER=$env:RUN_NUMBER
-        msbuild /verbosity:quiet /m /p:Configuration=$config /p:Platform=$msplatform AIS-catcher.sln
-        cd ..
-        cp LICENSE output\Licenses\AIS-catcher
-
-    - name: Prepare output SDRPLAY
-      run: cp build\*.dll output; cp build\Release\*.exe output; cp plugins\* output\plugins; cp README.md output; 
-
-    - name: Upload Artifacts SDRPLAY
-      uses: actions/upload-artifact@v5
-      with:
-        name: "AIS-catcher SDRPLAY ${{matrix.platform}}"
-        path: output
-
-    - name: Compress, upload, and delete ZIP file
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        Compress-Archive -Path output/* -DestinationPath "output/AIS-catcher SDRPLAY ${{matrix.platform}}.zip"
-        bash -c "gh release upload 'Edge' './output/AIS-catcher SDRPLAY ${{matrix.platform}}.zip' --repo ${{ github.repository }} --clobber"
-        del "output\AIS-catcher SDRPLAY ${{matrix.platform}}.zip"
+    # SDRPlay build temporarily disabled to speed up CI
+    # - name: Download SDRPlay API
+    #   run: |
+    #     cd "C:/Program Files/"
+    #     Invoke-WebRequest -Uri " https://www.sdrplay.com/software/SDRplay_RSP_API-Windows-3.09.exe" -OutFile sdrplay.exe
+    #     choco install innoextract
+    #     innoextract sdrplay.exe
+    #     ren app SDRplay
+    #
+    # - name: Building with SDRPlay support
+    #   run: |
+    #     cp "C:\Program Files\SDRplay\API\docs\SDRplay_RSP_API_Release_Notes_V3.09.pdf" output\Licenses\SDRPLAY.pdf
+    #
+    #     echo "x64" > x64-a; echo "Win32" > x86-a; $msplatform = $(cat "${{matrix.platform}}-a")
+    #     $gen = "Visual Studio 17 2022"
+    #     $config = "Release"
+    #
+    #     echo "AIS-catcher"
+    #
+    #     Remove-Item build -Recurse
+    #     mkdir build; cd build
+    #     cmake .. -A $msplatform -G $gen -DPOTHOSSDR_INCLUDE_DIR=${{github.workspace}}\include -DPOTHOSSDR_LIBRARY_DIR=${{github.workspace}}\lib -DPOTHOSSDR_BINARY_DIR=${{github.workspace}}\release -DRUN_NUMBER=$env:RUN_NUMBER
+    #     msbuild /verbosity:quiet /m /p:Configuration=$config /p:Platform=$msplatform AIS-catcher.sln
+    #     cd ..
+    #     cp LICENSE output\Licenses\AIS-catcher
+    #
+    # - name: Prepare output SDRPLAY
+    #   run: cp build\*.dll output; cp build\Release\*.exe output; cp plugins\* output\plugins; cp README.md output;
+    #
+    # - name: Upload Artifacts SDRPLAY
+    #   uses: actions/upload-artifact@v5
+    #   with:
+    #     name: "AIS-catcher SDRPLAY ${{matrix.platform}}"
+    #     path: output
+    #
+    # - name: Compress, upload, and delete ZIP file
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   run: |
+    #     Compress-Archive -Path output/* -DestinationPath "output/AIS-catcher SDRPLAY ${{matrix.platform}}.zip"
+    #     bash -c "gh release upload 'Edge' './output/AIS-catcher SDRPLAY ${{matrix.platform}}.zip' --repo ${{ github.repository }} --clobber"
+    #     del "output\AIS-catcher SDRPLAY ${{matrix.platform}}.zip"
