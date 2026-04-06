@@ -16,7 +16,7 @@ jobs:
       run_number: ${{ steps.set_run_number.outputs.run_number }}
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set run number for downstream jobs
       id: set_run_number
@@ -25,9 +25,9 @@ jobs:
         echo "Run number: ${{ github.run_number }}"
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
-        node-version: '20'
+        node-version: '22'
 
     - name: Install required tools
       run: |
@@ -64,11 +64,11 @@ jobs:
     strategy:
       matrix:
         distro: ['debian']
-        codename: ['bullseye', 'bookworm', 'trixie']
+        codename: ['bookworm', 'trixie']
         arch: ['amd64', 'arm64', 'armhf']
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         ref: main
         fetch-depth: 0
@@ -77,10 +77,10 @@ jobs:
       run: echo "filename=ais-catcher_${{ matrix.distro }}_${{ matrix.codename }}_${{ matrix.arch }}.deb" >> $GITHUB_ENV
 
     - name: Setup QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
 
     - name: Setup Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Map architecture
       id: arch
@@ -107,7 +107,7 @@ jobs:
       run: gh release upload 'Edge' ${{ env.filename }} --repo ${{ github.repository }} --clobber
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: ${{ env.filename }}
         path: ${{ env.filename }}
@@ -128,7 +128,7 @@ jobs:
             arch: 'armhf'
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         ref: main
         fetch-depth: 0
@@ -137,10 +137,10 @@ jobs:
       run: echo "filename=ais-catcher_${{ matrix.distro }}_${{ matrix.codename }}_${{ matrix.arch }}.deb" >> $GITHUB_ENV
 
     - name: Setup QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
 
     - name: Setup Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Map architecture
       id: arch
@@ -167,7 +167,7 @@ jobs:
       run: gh release upload 'Edge' ${{ env.filename }} --repo ${{ github.repository }} --clobber
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: ${{ env.filename }}
         path: ${{ env.filename }}
@@ -179,9 +179,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { distro: debian,  codename: bullseye,  arch: amd64  }
-          - { distro: debian,  codename: bullseye,  arch: arm64  }
-          - { distro: debian,  codename: bullseye,  arch: armhf  }
           - { distro: debian,  codename: bookworm,  arch: amd64  }
           - { distro: debian,  codename: bookworm,  arch: arm64  }
           - { distro: debian,  codename: bookworm,  arch: armhf  }
@@ -201,10 +198,10 @@ jobs:
           - { distro: ubuntu,  codename: plucky,    arch: armhf  }
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Setup QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
 
     - name: Map architecture to platform
       id: arch
@@ -232,14 +229,14 @@ jobs:
     needs: build_debian
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
 
       - name: Calculate Container Metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -247,13 +244,13 @@ jobs:
             type=ref,event=tag
 
       - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
@@ -261,7 +258,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Images
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64, linux/arm64, linux/arm/v7
@@ -281,13 +278,13 @@ jobs:
       matrix:
         platform: [x86, x64]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         ref: main
         fetch-depth: 0
     
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      uses: microsoft/setup-msbuild@v3
       with:
         msbuild-architecture: ${{matrix.platform}}
 
@@ -373,15 +370,16 @@ jobs:
         cp hackrf\host\libhackrf\src\*.h include
         cp hackrf\COPYING output\Licenses\HACKRF
 
-        # echo "HYDRASDR"
-        # git clone https://github.com/hydrasdr/hydrasdr-host.git
-        # cd hydrasdr-host; mkdir build; cd build
-        # cmake .. -A $msplatform -G $gen -DLIBUSB_LIBRARIES="$libusb_lib" -DLIBUSB_INCLUDE_DIR="$libusb_inc" -DTHREADS_PTHREADS_WIN32_LIBRARY="$pthread_lib" -DTHREADS_PTHREADS_INCLUDE_DIR="$pthread_inc"
-        # cmake --build . --config $config
-        # cd ..; cd ..
-        # cp hydrasdr-host\build\libhydrasdr\src\$config\*.lib lib
-        # cp hydrasdr-host\libhydrasdr\src\*.h include
-        # cp hydrasdr-host\LICENSE.md output\Licenses\HYDRASDR
+        echo "HYDRASDR"
+        git clone https://github.com/hydrasdr/hydrasdr-host.git
+        cd hydrasdr-host; mkdir build; cd build
+        cmake .. -A $msplatform -G $gen -DLIBUSB_LIBRARIES="$libusb_lib" -DLIBUSB_INCLUDE_DIR="$libusb_inc" -DTHREADS_PTHREADS_WIN32_LIBRARY="$pthread_lib" -DTHREADS_PTHREADS_INCLUDE_DIR="$pthread_inc"
+        cmake --build . --config $config
+        cd ..; cd ..
+        cp hydrasdr-host\build\libhydrasdr\src\$config\*.dll release
+        cp hydrasdr-host\build\libhydrasdr\src\$config\*.lib lib
+        cp hydrasdr-host\libhydrasdr\src\*.h include
+        cp hydrasdr-host\libhydrasdr\LICENSE.md output\Licenses\HYDRASDR
 
         echo "AIS-catcher"
         mkdir build; cd build
@@ -394,7 +392,7 @@ jobs:
       run: cp build\*.dll output; cp build\Release\*.exe output; cp plugins\* output\plugins; cp README.md output; 
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: "AIS-catcher ${{matrix.platform}}"
         path: output
@@ -436,7 +434,7 @@ jobs:
       run: cp build\*.dll output; cp build\Release\*.exe output; cp plugins\* output\plugins; cp README.md output; 
 
     - name: Upload Artifacts SDRPLAY
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: "AIS-catcher SDRPLAY ${{matrix.platform}}"
         path: output
