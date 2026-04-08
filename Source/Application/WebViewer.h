@@ -189,6 +189,7 @@ public:
 	void setRealtime(bool b);
 	void setLog(bool b);
 	void setDecoder(bool b);
+	void setStation(const std::string &name);
 	void setReceivers(const std::vector<std::unique_ptr<ReceiverTracker>> &states);
 	void addPlugin(const std::string &path);
 	void addPluginCode(const std::string &code);

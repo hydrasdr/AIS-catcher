@@ -67,6 +67,11 @@ void PluginManager::setDecoder(bool b)
 	plugin_preamble += "decoder_enabled = " + std::string(b ? "true" : "false") + ";\n";
 }
 
+void PluginManager::setStation(const std::string &name)
+{
+	plugin_preamble += "tab_title_station = " + name + ";\n";
+}
+
 void PluginManager::setReceivers(const std::vector<std::unique_ptr<ReceiverTracker>> &states)
 {
 	if (states.size() > 1)
@@ -1178,6 +1183,7 @@ Setting &WebViewer::Set(std::string option, std::string arg)
 	else if (option == "STATION")
 	{
 		station = JSON::StringBuilder::stringify(arg);
+		pluginManager.setStation(station);
 	}
 	else if (option == "STATION_LINK")
 	{

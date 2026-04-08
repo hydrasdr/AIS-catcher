@@ -11,6 +11,7 @@ import * as olStyle from 'ol/style';
 import * as olProj from 'ol/proj';
 import * as olSphere from 'ol/sphere';
 import * as olExtent from 'ol/extent';
+import * as olTilegrid from 'ol/tilegrid';
 import 'ol/ol.css';
 
 Chart.register(Annotation);
@@ -27,4 +28,5 @@ window.ol = {
   proj: olProj,
   sphere: olSphere,
   extent: olExtent,
+  tilegrid: olTilegrid,
 };
